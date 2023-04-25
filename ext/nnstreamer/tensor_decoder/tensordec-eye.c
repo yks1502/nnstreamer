@@ -44,11 +44,11 @@ void fini_eye (void) __attribute__ ((destructor));
     "text/x-raw, format = (string) utf8"
 
 /** @brief Internal data structure for image labeling */
-typedef struct
-{
-  imglabel_t labels;
-  char *label_path;
-} ImageLabelData;
+//typedef struct
+//{
+//  imglabel_t labels;
+//  char *label_path;
+//} ImageLabelData;
 
 /** @brief tensordec-plugin's GstTensorDecoderDef callback */
 static int
@@ -61,6 +61,7 @@ eye_init (void **pdata)
 //    return FALSE;
 //  }
 
+  UNUSED (pdata);
   return TRUE;
 }
 
@@ -77,6 +78,7 @@ eye_exit (void **pdata)
 //
 //  g_free (*pdata);
 //  *pdata = NULL;
+  UNUSED (pdata);
 }
 
 /** @brief tensordec-plugin's GstTensorDecoderDef callback */
@@ -101,6 +103,10 @@ eye_setOption (void **pdata, int opNum, const char *param)
 //  }
 //
 //  GST_INFO ("Property mode-option-%d is ignored", opNum + 1);
+
+  UNUSED (pdata);
+  UNUSED (opNum);
+  UNUSED (param);
   return TRUE;
 }
 
@@ -125,6 +131,8 @@ eye_getOutCaps (void **pdata, const GstTensorsConfig * config)
 
   caps = gst_caps_from_string (DECODER_EYE_TEXT_CAPS_STR);
 //  setFramerateFromConfig (caps, config);
+  UNUSED (pdata);
+  UNUSED (config);
   return caps;
 }
 
@@ -242,6 +250,19 @@ eye_decode (void **pdata, const GstTensorsConfig * config,
 
   GstMapInfo out_info;
   GstMemory *out_mem;
+  gsize size;
+  char str[1024];
+  gsize num_data;
+
+  UNUSED (pdata);
+
+  num_data = gst_tensor_info_get_size(&config->info.info[0]);
+  sprintf(str, "%lu = %f, %f, %f",
+      num_data,
+      ((float*) input->data)[0],
+      ((float*) input->data)[1],
+      ((float*) input->data)[2]);
+  size = strlen (str);
 
   if (gst_buffer_get_size (outbuf) == 0) {
     out_mem = gst_allocator_alloc (NULL, size, NULL);
@@ -252,7 +273,13 @@ eye_decode (void **pdata, const GstTensorsConfig * config,
     out_mem = gst_buffer_get_all_memory (outbuf);
   }
 
-  memcpy (out_info.data, "__TEST__", size);
+  if (!gst_memory_map (out_mem, &out_info, GST_MAP_WRITE)) {
+    ml_loge ("Cannot map output memory / tensordec-eye.\n");
+    gst_memory_unref (out_mem);
+    return GST_FLOW_ERROR;
+  }
+
+  memcpy (out_info.data, str, size);
   gst_memory_unmap (out_mem, &out_info);
   gst_buffer_append_memory (outbuf, out_mem);
 
