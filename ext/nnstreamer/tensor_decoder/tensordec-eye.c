@@ -252,16 +252,22 @@ eye_decode (void **pdata, const GstTensorsConfig * config,
   GstMemory *out_mem;
   gsize size;
   char str[1024];
-  gsize num_data;
+//  size_t i;
+  const GstTensorMemory  * data;
 
   UNUSED (pdata);
+  UNUSED (config);
 
-  num_data = gst_tensor_info_get_size(&config->info.info[0]);
-  sprintf(str, "%lu = %f, %f, %f",
-      num_data,
-      ((float*) input->data)[0],
-      ((float*) input->data)[1],
-      ((float*) input->data)[2]);
+  data = &input[1];
+//  while (i++ < data->size) {
+//    float d = ((float*) data->data)[i];
+//      ml_logw("input[%lu]=%f\n", i, d);
+//  }
+
+  sprintf(str, "%f, %f, %f",
+      ((float*) data->data)[35],
+      ((float*) data->data)[36],
+      ((float*) data->data)[38]);
   size = strlen (str);
 
   if (gst_buffer_get_size (outbuf) == 0) {
