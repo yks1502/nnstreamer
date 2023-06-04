@@ -114,6 +114,25 @@ static_library('nnstreamer_decoder_eye_detecting',
   install_dir: nnstreamer_libdir
 ) 
 
+# landmark detecting
+decoder_sub_landmark_detecting_sources = [
+  'tensordec-landmark.c',
+  'tensordecutil.c'
+]
+
+shared_library('nnstreamer_decoder_landmark_detecting',
+  decoder_sub_landmark_detecting_sources,
+  dependencies: [nnstreamer_dep, glib_dep, gst_dep],
+  install: true,
+  install_dir: decoder_subplugin_install_dir
+)
+static_library('nnstreamer_decoder_landmark_detecting',
+  decoder_sub_landmark_detecting_sources,
+  dependencies: [nnstreamer_dep, glib_dep, gst_dep],
+  install: true,
+  install_dir: nnstreamer_libdir
+) 
+
 # protobuf decoder
 if protobuf_support_is_available
   decoder_sub_protobuf_sources = [
