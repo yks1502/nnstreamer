@@ -15,8 +15,7 @@ gst-launch-1.0 -m \
        queue ! tensor_transform mode=arithmetic option=typecast:float32,div:255.0 ! \
        tensor_filter framework=tensorflow2-lite model=face_detection_front.tflite \
                       output=16:896:1:1,1:896:1:1 \
-                      outputname=
- * @brief	GStreamer plugin to crop video,classificators \
+                      outputname=landmarks,scores \
                       outputtype=float32,float32 ! \
        tensor_decoder mode=landmark_detecting ! tensor_split name=split tensorseg=4:1:1,4:1:1 \
        split.src0 ! queue ! crop_left.info \
