@@ -1000,6 +1000,8 @@ cp -r result %{buildroot}%{_datadir}/nnstreamer/unittest/
 %{_prefix}/lib/nnstreamer/decoders/libnnstreamer_decoder_image_labeling.so
 %{_prefix}/lib/nnstreamer/decoders/libnnstreamer_decoder_direct_video.so
 %{_prefix}/lib/nnstreamer/decoders/libnnstreamer_decoder_octet_stream.so
+%{_prefix}/lib/nnstreamer/decoders/libnnstreamer_decoder_eye_detecting.so
+%{_prefix}/lib/nnstreamer/decoders/libnnstreamer_decoder_landmark_detecting.so
 %{_prefix}/lib/nnstreamer/filters/libnnstreamer_filter_cpp.so
 %{gstlibdir}/libnnstreamer.so
 %if 0%{?nnstreamer_edge_support}

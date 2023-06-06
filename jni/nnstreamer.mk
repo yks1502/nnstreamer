@@ -69,6 +69,7 @@ NNSTREAMER_PLUGINS_SRCS := \
     $(NNSTREAMER_GST_HOME)/elements/gsttensor_split.c \
     $(NNSTREAMER_GST_HOME)/elements/gsttensor_trainer.c \
     $(NNSTREAMER_GST_HOME)/elements/gsttensor_transform.c \
+    $(NNSTREAMER_GST_HOME)/elements/gsttensor_videocrop.c \
     $(NNSTREAMER_GST_HOME)/tensor_filter/tensor_filter.c
 
 # tensor-query element with nnstreamer-edge
@@ -169,6 +170,16 @@ NNSTREAMER_DECODER_OS_SRCS := \
     $(NNSTREAMER_EXT_HOME)/tensor_decoder/tensordec-octetstream.c \
     $(NNSTREAMER_EXT_HOME)/tensor_decoder/tensordecutil.c
 
+# decoder eye detecting
+NNSTREAMER_DECODER_ED_SRCS := \
+    $(NNSTREAMER_EXT_HOME)/tensor_decoder/tensordec-eye.c \
+    $(NNSTREAMER_EXT_HOME)/tensor_decoder/tensordecutil.c
+
+# decoder landmark detecting
+NNSTREAMER_DECODER_ED_SRCS := \
+    $(NNSTREAMER_EXT_HOME)/tensor_decoder/tensordec-landmark.c \
+    $(NNSTREAMER_EXT_HOME)/tensor_decoder/tensordecutil.c
+
 # gstreamer join element
 NNSTREAMER_JOIN_SRCS := \
     $(NNSTREAMER_ROOT)/gst/join/gstjoin.c
@@ -215,4 +226,4 @@ endif
 GST_BUILDING_BLOCK_LIST := $(GST_LIBS_COMMON) $(GST_LIBS_GST)
 
 # gstreamer building block for decoder and filter
-NNSTREAMER_BUILDING_BLOCK_LIST := $(GST_BUILDING_BLOCK_LIST) nnstreamer nnstreamer_decoder_bounding_boxes nnstreamer_decoder_pose_estimation nnstreamer_filter_tensorflow-lite nnstreamer_decoder_flatbuf
+NNSTREAMER_BUILDING_BLOCK_LIST := $(GST_BUILDING_BLOCK_LIST) nnstreamer nnstreamer_decoder_bounding_boxes nnstreamer_decoder_pose_estimation nnstreamer_filter_tensorflow-lite nnstreamer_decoder_flatbuf nnstreamer_decoder_eye_detecting nnstreamer_decoder_landmark_detecting
