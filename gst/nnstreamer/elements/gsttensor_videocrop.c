@@ -146,6 +146,7 @@ gst_tensor_video_crop_class_init (GstTensorVideoCropClass * klass)
       "Crops video into a tensor-defined region",
       "Kiwoong Kim");
 
+  GST_WARNING("CAPS");
   basetransform_class->before_transform =
       GST_DEBUG_FUNCPTR (gst_tensor_video_crop_before_transform);
   basetransform_class->transform_ip_on_passthrough = FALSE;
@@ -169,15 +170,25 @@ gst_tensor_video_crop_init (GstTensorVideoCrop * tvcrop)
 {
   GST_DEBUG_CATEGORY_INIT (tensor_video_crop_debug, "tensor_videocrop", 0, "videocrop");
 
-  tvcrop->prop_left = -1;
-  tvcrop->prop_top = -1;
-  tvcrop->prop_width = -1;
-  tvcrop->prop_height = -1;
+  tvcrop->prop_left = 0;
+  tvcrop->prop_top = 0;
+  tvcrop->prop_width = 0.8;
+  tvcrop->prop_height = 0.8;
 
   tvcrop->crop_left = 0;
   tvcrop->crop_right = 0;
   tvcrop->crop_top = 0;
   tvcrop->crop_bottom = 0;
+
+
+  /** init tensor infos */
+  tvcrop->sinkpad_info =
+      gst_pad_new_from_static_template (&info_template, "info");
+  gst_element_add_pad (GST_ELEMENT (tvcrop), tvcrop->sinkpad_info);
+  gst_pad_set_event_function (tvcrop->sinkpad_info,
+    GST_DEBUG_FUNCPTR (gst_tensor_video_crop_sink_event));
+  gst_pad_set_chain_function (tvcrop->sinkpad_info,
+    GST_DEBUG_FUNCPTR (gst_tensor_video_crop_sink_chain));
 }
 
 #define ROUND_DOWN_2(n)  ((n)&(~1))
@@ -205,15 +216,6 @@ gst_tensor_video_crop_transform_packed_complex (GstTensorVideoCrop * tvcrop,
   out_stride = GST_VIDEO_FRAME_PLANE_STRIDE (out_frame, 0);
 
   in_data += tvcrop->crop_top * in_stride;
-
-  /** init tensor infos */
-  tvcrop->sinkpad_info =
-      gst_pad_new_from_static_template (&info_template, "info");
-  gst_element_add_pad (GST_ELEMENT (tvcrop), tvcrop->sinkpad_info);
-  gst_pad_set_event_function (tvcrop->sinkpad_info,
-    GST_DEBUG_FUNCPTR (gst_tensor_video_crop_sink_event));
-  gst_pad_set_chain_function (tvcrop->sinkpad_info,
-    GST_DEBUG_FUNCPTR (gst_tensor_video_crop_sink_chain));
 
   gst_tensors_config_init (&tvcrop->tensors_config);
 
@@ -255,8 +257,8 @@ gst_tensor_video_crop_transform_packed_simple (GstTensorVideoCrop * tvcrop,
 {
   guint8 *in_data, *out_data;
   gint width, height;
-  guint dx;
-  gint i, in_stride, out_stride;
+  guint i, dx;
+  gint in_stride, out_stride;
 
   width = GST_VIDEO_FRAME_WIDTH (out_frame);
   height = GST_VIDEO_FRAME_HEIGHT (out_frame);
@@ -267,9 +269,9 @@ gst_tensor_video_crop_transform_packed_simple (GstTensorVideoCrop * tvcrop,
   in_stride = GST_VIDEO_FRAME_PLANE_STRIDE (in_frame, 0);
   out_stride = GST_VIDEO_FRAME_PLANE_STRIDE (out_frame, 0);
 
-  in_data += (tvcrop->crop_top + y) * in_stride;
+  in_data += (vcrop->crop_top + y) * in_stride;
   in_data +=
-      (tvcrop->crop_left + x) * GST_VIDEO_FRAME_COMP_PSTRIDE (in_frame, 0);
+      (vcrop->crop_left + x) * GST_VIDEO_FRAME_COMP_PSTRIDE (in_frame, 0);
 
   dx = width * GST_VIDEO_FRAME_COMP_PSTRIDE (out_frame, 0);
 
@@ -382,6 +384,7 @@ static GstFlowReturn
 gst_tensor_video_crop_transform_frame (GstVideoFilter * vfilter,
     GstVideoFrame * in_frame, GstVideoFrame * out_frame)
 {
+  
   GstTensorVideoCrop *tvcrop = GST_TENSOR_VIDEO_CROP (vfilter);
   GstVideoCropMeta *meta = gst_buffer_get_video_crop_meta (in_frame->buffer);
   gint x = 0, y = 0;
@@ -397,7 +400,7 @@ gst_tensor_video_crop_transform_frame (GstVideoFilter * vfilter,
     x = meta->x;
     y = meta->y;
   }
-
+  
   switch (tvcrop->packing) {
     case VIDEO_CROP_PIXEL_FORMAT_PACKED_SIMPLE:
       gst_tensor_video_crop_transform_packed_simple (tvcrop, in_frame, out_frame, x, y);
@@ -425,6 +428,7 @@ gst_tensor_video_crop_decide_allocation (GstBaseTransform * trans, GstQuery * qu
   GstTensorVideoCrop *crop = GST_TENSOR_VIDEO_CROP (trans);
   gboolean use_crop_meta;
 
+GST_WARNING("HEEELO");
   use_crop_meta = (gst_query_find_allocation_meta (query,
           GST_VIDEO_CROP_META_API_TYPE, NULL) &&
       gst_query_find_allocation_meta (query, GST_VIDEO_META_API_TYPE, NULL));
@@ -447,7 +451,7 @@ gst_tensor_video_crop_decide_allocation (GstBaseTransform * trans, GstQuery * qu
         ("Dowstream doesn't support crop for non-raw caps"), (NULL));
     return FALSE;
   }
-
+GST_WARNING("HEEELO");
   return GST_BASE_TRANSFORM_CLASS (parent_class)->decide_allocation (trans,
       query);
 }
@@ -515,10 +519,10 @@ gst_tensor_video_crop_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   if (!crop_meta)
     crop_meta = gst_buffer_add_video_crop_meta (buf);
 
-  crop_meta->x += self->crop_left;
-  crop_meta->y += self->crop_top;
-  crop_meta->width = GST_VIDEO_INFO_WIDTH (&self->out_info);
-  crop_meta->height = GST_VIDEO_INFO_HEIGHT (&self->out_info);
+  crop_meta->x += vcrop->crop_left;
+  crop_meta->y += vcrop->crop_top;
+  crop_meta->width = GST_VIDEO_INFO_WIDTH (&vcrop->out_info);
+  crop_meta->height = GST_VIDEO_INFO_HEIGHT (&vcrop->out_info);
 
   return GST_FLOW_OK;
 }
@@ -613,7 +617,6 @@ gst_tensor_video_crop_transform_dimension_value (const GValue * src_val,
   return ret;
 }
 
-/** TODO */
 static GstCaps *
 gst_tensor_video_crop_transform_caps (GstBaseTransform * trans,
     GstPadDirection direction, GstCaps * caps, GstCaps * filter_caps)
@@ -627,7 +630,7 @@ gst_tensor_video_crop_transform_caps (GstBaseTransform * trans,
 
   GST_OBJECT_LOCK (self);
 
-  GST_LOG_OBJECT (self, "l=%f,t=%f,w=%f,h=%f",
+  GST_INFO_OBJECT (self, "l=%f,t=%f,w=%f,h=%f",
       self->prop_left, self->prop_top, self->prop_width, self->prop_height);
 
   width = self->in_info.width;
@@ -637,18 +640,18 @@ gst_tensor_video_crop_transform_caps (GstBaseTransform * trans,
   h_dynamic = (self->prop_top < 0 || self->prop_height < 0);
 
   left = (self->prop_left < 0) ? 0 : (int) (self->prop_left * width);
-  right = (self->prop_width < 0) ? 0 : left + (int)(self->prop_width * width);
+  right = (self->prop_width < 0) ? 0 : left + (int)(self->prop_width * width-1);
   top = (self->prop_top < 0) ? 0 : (int) (self->prop_top * height);
-  bottom = (self->prop_height < 0) ? 0 : top + (int)(self->prop_height * height);
+  bottom = (self->prop_height < 0) ? 0 : top + (int)(self->prop_height * height-1);
 
   GST_OBJECT_UNLOCK (self);
 
   if (direction == GST_PAD_SRC) {
-    dx = left + right;
-    dy = top + bottom;
+    dx = (right - left) - width;
+    dy = (bottom - top) - height;
   } else {
-    dx = 0 - (left + right);
-    dy = 0 - (top + bottom);
+    dx = width - (right - left);
+    dy = height - (bottom - top);
   }
 
   GST_LOG_OBJECT (self, "transforming caps %" GST_PTR_FORMAT, caps);
@@ -705,58 +708,53 @@ gst_tensor_video_crop_transform_caps (GstBaseTransform * trans,
   return other_caps;
 }
 
-/** TODO */
 static gboolean
 gst_tensor_video_crop_set_info (GstVideoFilter * vfilter, GstCaps * in,
     GstVideoInfo * in_info, GstCaps * out, GstVideoInfo * out_info)
 {
   GstTensorVideoCrop *self = GST_TENSOR_VIDEO_CROP (vfilter);
   GstCapsFeatures *features;
-  int dx, dy, width, height, left, top;
+  int width, height, left, top;
   width = GST_VIDEO_INFO_WIDTH (in_info);
   height = GST_VIDEO_INFO_HEIGHT (in_info);
 
   GST_OBJECT_LOCK (self);
   self->need_update = FALSE;
   self->crop_left = left = (self->prop_left < 0) ? 0 : (int) (self->prop_left * width);
-  self->crop_right = (self->prop_width < 0) ? 0 : left + (int)(self->prop_width * width);
+  self->crop_right = (self->prop_width < 0) ? 0 : left + (int)(self->prop_width * width - 1);
   self->crop_top = top = (self->prop_top < 0) ? 0 : (int) (self->prop_top * height);
-  self->crop_bottom = (self->prop_height < 0) ? 0 : top + (int)(self->prop_height * height);
+  self->crop_bottom = (self->prop_height < 0) ? 0 : top + (int)(self->prop_height * height -1);
   GST_OBJECT_UNLOCK (self);
 
-  dx = GST_VIDEO_INFO_WIDTH (in_info) - GST_VIDEO_INFO_WIDTH (out_info);
-  dy = GST_VIDEO_INFO_HEIGHT (in_info) - GST_VIDEO_INFO_HEIGHT (out_info);
 
-  if (self->crop_left <= 0 && self->crop_right <= 0) {
-    self->crop_left = dx / 2;
-    self->crop_right = dx / 2 + (dx & 1);
-  } else if (self->crop_left <= 0) {
-    if (G_UNLIKELY (self->crop_right > dx))
+  if (self->crop_left < 0 && self->crop_right < 0) {
+    self->crop_left = 0;
+    self->crop_right = width - 1;
+  } else if (self->crop_left < 0) {
+    if (G_UNLIKELY (self->crop_right > width))
       goto cropping_too_much;
-    self->crop_left = dx - self->crop_right;
-  } else if (self->crop_right <= 0) {
-    if (G_UNLIKELY (self->crop_left > dx))
+    self->crop_left = 0;
+  } else if (self->crop_right < 0) {
+    if (G_UNLIKELY (self->crop_left >= 0))
       goto cropping_too_much;
-    self->crop_right = dx - self->crop_left;
+    self->crop_right = width - self->crop_left - 1;
   }
 
   if (self->crop_top <= 0 && self->crop_bottom <= 0) {
-    self->crop_top = dy / 2;
-    self->crop_bottom = dy / 2 + (dy & 1);
+    self->crop_top = 0;
+    self->crop_bottom = height - 1;
   } else if (self->crop_top <=0) {
-    if (G_UNLIKELY (self->crop_bottom > dy))
+    if (G_UNLIKELY (self->crop_bottom >= height))
       goto cropping_too_much;
-    self->crop_top = dy - self->crop_bottom;
+    self->crop_top = 0;
   } else if (self->crop_bottom <= 0) {
-    if (G_UNLIKELY (self->crop_top > dy))
+    if (G_UNLIKELY (self->crop_top >= 0))
       goto cropping_too_much;
-    self->crop_bottom = dy - self->crop_top;
+    self->crop_bottom = height - self->crop_top - 1;
   }
 
-  if (G_UNLIKELY ((self->crop_left + self->crop_right) >=
-          GST_VIDEO_INFO_WIDTH (in_info)
-          || (self->crop_top + self->crop_bottom) >=
-          GST_VIDEO_INFO_HEIGHT (in_info)))
+  if (G_UNLIKELY ((self->crop_right) >= width
+          || self->crop_bottom >= height))
     goto cropping_too_much;
 
   if (in && out)
@@ -850,6 +848,12 @@ gst_tensor_video_crop_set_info (GstVideoFilter * vfilter, GstCaps * in,
 beach:
   self->in_info = *in_info;
   self->out_info = *out_info;
+  if(out_info) {
+    GST_WARNING("parse_out info");
+    GST_WARNING_OBJECT(&self->out_info, "out info");
+    out_info->width = self->crop_right - self->crop_left;
+    out_info->height = self->crop_bottom - self->crop_top;
+  }
 
   /* Ensure our decide_allocation will be called again when needed */
   if (gst_base_transform_is_passthrough (GST_BASE_TRANSFORM (self))) {
@@ -930,14 +934,26 @@ static gboolean
 gst_tensor_video_crop_parse_caps (GstTensorVideoCrop * tvcrop, GstCaps * caps)
 {
   GstStructure *structure;
-  GstTensorsConfig *config;
-
-  config = &tvcrop->tensors_config;
+  GstTensorsConfig config;
+  int i;
+  gst_tensors_config_init(&config);
 
   structure = gst_caps_get_structure (caps, 0);
-  gst_tensors_config_from_structure (config, structure);
+  gst_tensors_config_from_structure (&config, structure);
+  tvcrop->tensors_config.rate_d = config.rate_d;
+  tvcrop->tensors_config.rate_n = config.rate_n;
+  tvcrop->tensors_config.info.info[0].dimension[0] = 4;
+  tvcrop->tensors_config.info.info[0].type = _NNS_FLOAT32;
+  tvcrop->tensors_config.info.num_tensors = 1;
+  tvcrop->tensors_config.info.format = config.info.format;
 
-  return gst_tensors_config_validate (config);
+  for (i = 1; i < NNS_TENSOR_RANK_LIMIT; i++) {
+    tvcrop->tensors_config.info.info[0].dimension[i] = 1;
+  }
+
+  gst_tensors_config_free(&config);
+
+  return gst_tensors_config_validate (&tvcrop->tensors_config);
 }
 
 static gboolean
@@ -947,10 +963,13 @@ gst_tensor_video_crop_sink_event (GstPad * pad, GstObject * parent, GstEvent * e
 
   self = GST_TENSOR_VIDEO_CROP (parent);
 
+  GST_WARNING_OBJECT (self, "l=%f,t=%f,w=%f,h=%f",
+      self->prop_left, self->prop_top, self->prop_width, self->prop_height);
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_CAPS:
     {
       GstCaps *caps;
+
       gst_event_parse_caps (event, &caps);
       gst_tensor_video_crop_parse_caps (self, caps);
       break;
@@ -971,23 +990,16 @@ gst_tensor_video_crop_get_info (GstTensorVideoCrop * self, GstBuffer * info,
   GstMapInfo map;
   GstTensorMetaInfo meta;
   gsize hsize, dsize, esize;
-  guint i;
   gboolean ret = FALSE;
 
-  i = gst_buffer_n_memory (info);
-  g_assert (i > 0);
-  if (i > 1) {
-    GST_WARNING_OBJECT (self,
-        "Info buffer has %u memories, parse first one.", i);
-  }
-
-  mem = gst_buffer_peek_memory (info, 0);
+  mem = gst_buffer_get_all_memory (info);
+  
   if (!gst_memory_map (mem, &map, GST_MAP_READ)) {
     GST_ERROR_OBJECT (self, "Failed to map the info buffer.");
     return FALSE;
   }
 
-  /* parse crop-info from flex tensor */
+  /* parse crop-info from tensor */
   if (!gst_tensor_meta_info_parse_header (&meta, map.data)) {
     GST_ERROR_OBJECT (self, "Failed to get the meta from info buffer.");
     goto done;
@@ -1015,16 +1027,16 @@ gst_tensor_video_crop_get_info (GstTensorVideoCrop * self, GstBuffer * info,
   /** hard cording to match cinfo->members*/
   gst_tensor_data_raw_typecast (
     map.data + hsize + (esize * 0),
-    meta.type, (guint8 *) (&cinfo->left), _NNS_FLOAT32);
+    meta.type, (&cinfo->left), _NNS_FLOAT32);
   gst_tensor_data_raw_typecast (
     map.data + hsize + (esize * 1),
-    meta.type, (guint8 *) (&cinfo->top), _NNS_FLOAT32);
+    meta.type, (&cinfo->top), _NNS_FLOAT32);
   gst_tensor_data_raw_typecast (
     map.data + hsize + (esize * 2),
-    meta.type, (guint8 *) (&cinfo->width), _NNS_FLOAT32);
+    meta.type, (&cinfo->width), _NNS_FLOAT32);
   gst_tensor_data_raw_typecast (
     map.data + hsize + (esize * 3),
-    meta.type, (guint8 *) (&cinfo->height), _NNS_FLOAT32);
+    meta.type, (&cinfo->height), _NNS_FLOAT32);
   ret = TRUE;
 
 done:
@@ -1042,6 +1054,7 @@ gst_tensor_video_crop_sink_chain (GstPad * pad, GstObject * parent, GstBuffer * 
   UNUSED (pad);
   self = GST_TENSOR_VIDEO_CROP (parent);
 
+  GST_DEBUG("BEGIN PARSE, goint to get tensor");
   buf = gst_tensor_buffer_from_config (buf, &self->tensors_config);
 
   if (gst_tensors_config_is_flexible (&self->tensors_config)) {
@@ -1056,19 +1069,22 @@ gst_tensor_video_crop_sink_chain (GstPad * pad, GstObject * parent, GstBuffer * 
   GST_DEBUG_OBJECT (self, " Number of Tensors: %d", num_tensors);
 
   if (!gst_tensor_video_crop_get_info (self, buf, &vcinfo)) {
-    ret = GST_FLOW_ERROR; 
-  } else {
-    
-    GST_OBJECT_LOCK (self);
-    self->prop_left = vcinfo.left;
-    self->prop_top = vcinfo.top;
-    self->prop_width = vcinfo.width;
-    self->prop_height = vcinfo.height;
-    GST_OBJECT_UNLOCK (self);
+    ret = GST_FLOW_ERROR;
   }
+    
+  GST_WARNING ("tensor parsed\n\nnum: %d, l=%f,t=%f,w=%f,h=%f",
+      vcinfo.num,vcinfo.left, vcinfo.top, vcinfo.width, vcinfo.height);
+  GST_OBJECT_LOCK (self);
+  self->prop_left = vcinfo.left;
+  self->prop_top = vcinfo.top;
+  self->prop_width = vcinfo.width;
+  self->prop_height = vcinfo.height;
+  self->need_update = TRUE;
+  GST_OBJECT_UNLOCK (self);
   if (buf)
     gst_buffer_unref (buf);
 
+  gst_base_transform_reconfigure_src(GST_BASE_TRANSFORM(self));
   return ret;
 
 

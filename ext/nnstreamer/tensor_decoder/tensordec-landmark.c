@@ -40,7 +40,10 @@ void init_landmark (void) __attribute__ ((constructor));
 void fini_landmark (void) __attribute__ ((destructor));
 
 #define DECODER_LANDMARK_TEXT_CAPS_STR \
-    GST_TENSOR_CAP_DEFAULT ";" GST_TENSORS_CAP_WITH_NUM ("1")
+    GST_TENSOR_CAP_DEFAULT ";" GST_TENSORS_CAP_WITH_NUM ("1") ",types=float32, dimensions = 4:1:1:1:1:1"
+
+// define DECODER_LANDMARK_TEXT_CAPS_STR 
+//     "text/x-raw, format = (string) utf8, framerate=30/1"
 
 #define LANDMARK_IDX_LOCATIONS_DEFAULT 0
 #define LANDMARK_IDX_SCORES_DEFAULT 1
@@ -86,24 +89,25 @@ typedef struct
     boxbpi = config->info.info[locations_idx].dimension[0]; \
     for (d = 0; d < 896; d++) { \
       detectedFace face; \
-      if (scores_[d] < 80) \
+      if (scores_[d] < 0.7) \
         continue; \
-      face.ymin = locations_[d * boxbpi + 1]; \
+      num_detection++; \
+      face.ymin = locations_[d * boxbpi + 0]; \
       face.xmin = locations_[d * boxbpi + 1]; \
-      face.ymax = locations_[d * boxbpi + 1]; \
-      face.xmax = locations_[d * boxbpi + 1]; \
-      face.right_eye_x = locations_[d * boxbpi + 1]; \
-      face.right_eye_y = locations_[d * boxbpi + 1]; \
-      face.left_eye_x = locations_[d * boxbpi + 1]; \
-      face.left_eye_y = locations_[d * boxbpi + 1]; \
-      face.nose_x = locations_[d * boxbpi + 1]; \
-      face.nose_y = locations_[d * boxbpi + 1]; \
-      face.mouth_x = locations_[d * boxbpi + 1]; \
-      face.mouth_y = locations_[d * boxbpi + 1]; \
-      face.right_ear_x = locations_[d * boxbpi + 1]; \
-      face.right_ear_y = locations_[d * boxbpi + 1]; \
-      face.left_ear_x = locations_[d * boxbpi + 1]; \
-      face.left_ear_y = locations_[d * boxbpi + 1]; \
+      face.ymax = locations_[d * boxbpi + 2]; \
+      face.xmax = locations_[d * boxbpi + 3]; \
+      face.right_eye_x = locations_[d * boxbpi + 4]; \
+      face.right_eye_y = locations_[d * boxbpi + 5]; \
+      face.left_eye_x = locations_[d * boxbpi + 6]; \
+      face.left_eye_y = locations_[d * boxbpi + 7]; \
+      face.nose_x = locations_[d * boxbpi + 8]; \
+      face.nose_y = locations_[d * boxbpi + 9]; \
+      face.mouth_x = locations_[d * boxbpi + 10]; \
+      face.mouth_y = locations_[d * boxbpi + 11]; \
+      face.right_ear_x = locations_[d * boxbpi + 12]; \
+      face.right_ear_y = locations_[d * boxbpi + 13]; \
+      face.left_ear_x = locations_[d * boxbpi + 14]; \
+      face.left_ear_y = locations_[d * boxbpi + 15]; \
       face.score = scores_[d]; \
       g_array_append_val (results, face); \
     } \
@@ -117,8 +121,10 @@ typedef struct
 /** @brief tensordec-plugin's GstTensorDecoderDef callback */
 static int
 landmark_init (void **pdata)
-{
-  UNUSED (pdata);
+{        
+  
+  *pdata = g_new0 (GstTensorsConfig, 1);
+  gst_tensors_config_init(*pdata);
   return TRUE;
 }
 
@@ -126,7 +132,8 @@ landmark_init (void **pdata)
 static void
 landmark_exit (void **pdata)
 {
-  UNUSED (pdata);
+  gst_tensors_config_free(*pdata);
+  g_free (*pdata);
 }
 
 /** @brief tensordec-plugin's GstTensorDecoderDef callback */
@@ -143,23 +150,9 @@ landmark_setOption (void **pdata, int opNum, const char *param)
 static GstCaps *
 landmark_getOutCaps (void **pdata, const GstTensorsConfig * config)
 {
-//  const uint32_t *dim;
   GstCaps *caps;
-//  int i;
-//  UNUSED (pdata);
-//
-//  g_return_val_if_fail (config != NULL, NULL);
-//  g_return_val_if_fail (config->info.num_tensors == 2, NULL);
-//
-//  /* Even if it's multi-tensor, we use the first tensor only in image labeling */
-//  dim = config->info.info[0].dimension;
-//  /* This allows N:1 only! */
-//  g_return_val_if_fail (dim[0] > 0 && dim[1] == 1, NULL);
-//  for (i = 2; i < NNS_TENSOR_RANK_LIMIT; i++)
-//    g_return_val_if_fail (dim[i] == 1, NULL);
-
   caps = gst_caps_from_string (DECODER_LANDMARK_TEXT_CAPS_STR);
-//  setFramerateFromConfig (caps, config);
+  setFramerateFromConfig (caps, config);
   UNUSED (pdata);
   UNUSED (config);
   return caps;
@@ -204,12 +197,12 @@ case typename:\
 
 
 static void
-tensorize_face (GstMapInfo * out_info, GArray * results)
+tensorize_face (GstMapInfo * out_info, GArray * results, size_t hsize)
 {
    /* Let's draw per pixel (4bytes) */
   float *out_tensor = (float *) out_info->data;
   unsigned int i, best_idx;
-  float best_score = 0;
+  float best_score = -1;
   detectedFace *best_face;
   
   for (i = 0; i < results->len; i++) {
@@ -219,16 +212,68 @@ tensorize_face (GstMapInfo * out_info, GArray * results)
       best_idx = i;
     }
   }
-  best_face = &g_array_index (results, detectedFace, best_idx);
-  /** @todo: convert best_face to eye */
-  out_tensor[0] = best_face->left_eye_x;
-  out_tensor[1] = best_face->left_eye_y;
-  out_tensor[2] = 0.2;
-  out_tensor[3] = 0.2;
-  out_tensor[4] = best_face->right_eye_x - 0.2;
-  out_tensor[5] = best_face->right_eye_y - 0.2;
-  out_tensor[2] = 0.2;
-  out_tensor[3] = 0.2;
+  if(best_score > 0) {
+    best_face = &g_array_index (results, detectedFace, best_idx);
+  } else {
+    GST_WARNING("NO BEST FACE");
+  }
+  UNUSED(best_face);
+    GST_WARNING("NO BEST FACE");
+  out_tensor[hsize/4 + 0] = 0.3;
+  out_tensor[hsize/4 + 1] = 0.3;
+  out_tensor[hsize/4 + 2] = 0.2;
+  out_tensor[hsize/4 + 3] = 0.2;
+    GST_WARNING("NO BEST FACE");
+
+  // out_tensor[hsize+0] = best_face->left_eye_x;
+  // out_tensor[hsize+1] = best_face->left_eye_y;
+  // out_tensor[hsize+2] = 0.2;
+  // out_tensor[hsize+3] = 0.2;
+  // out_tensor[hsize+4] = best_face->right_eye_x - 0.2;
+  // out_tensor[hsize+5] = best_face->right_eye_y - 0.2;
+  // out_tensor[hsize+6] = 0.2;
+  // out_tensor[hsize+7] = 0.2;
+
+  // if(best_score > 0) {
+  //   sprintf(out_tensor, "best_face @ %d\nl: %f %f\nr: %f %f\nscore=%f",
+  //       (int)best_idx,
+  //       (float)best_face->left_eye_x,
+  //       (float)best_face->left_eye_y,
+  //       (float) best_face->right_eye_x,
+  //       (float)best_face->right_eye_y,
+  //       (float)best_face->score);
+
+  //   GST_WARNING("best: %d of %d\nbox:%f %f %f %f\nle:%f %f\nre:%f %f\n%f %f %f %f  %f %f %f %f %f",
+  //     (int)best_idx,
+  //     results->len,
+  //     g_array_index (results, detectedFace, best_idx).xmin,
+  //     g_array_index (results, detectedFace, best_idx).ymin,
+  //     g_array_index (results, detectedFace, best_idx).xmax,
+  //     g_array_index (results, detectedFace, best_idx).ymax,
+  //     g_array_index (results, detectedFace, best_idx).right_eye_x,
+  //     g_array_index (results, detectedFace, best_idx).right_eye_y,
+  //     g_array_index (results, detectedFace, best_idx).left_eye_x,
+  //     g_array_index (results, detectedFace, best_idx).left_eye_y,
+  //     g_array_index (results, detectedFace, best_idx).nose_x,
+  //     g_array_index (results, detectedFace, best_idx).nose_y,
+  //     g_array_index (results, detectedFace, best_idx).mouth_x,
+  //     g_array_index (results, detectedFace, best_idx).mouth_y,
+  //     g_array_index (results, detectedFace, best_idx).right_ear_x,
+  //     g_array_index (results, detectedFace, best_idx).right_ear_y,
+  //     g_array_index (results, detectedFace, best_idx).left_ear_x,
+  //     g_array_index (results, detectedFace, best_idx).left_ear_y,
+  //     g_array_index (results, detectedFace, best_idx).score
+  //   );
+  // } else {
+  //   sprintf(out_tensor, "no face\nl: %f %f\nr: %f %f\nscore=%f",
+  //       (float)0,
+  //       (float)0,
+  //       (float)0,
+  //       (float)0,
+  //       (float)0);
+  // }
+
+  // GST_WARNING_OBJECT(out_info, "%f %f %f %f", out_tensor[0], out_tensor[1], out_tensor[2], out_tensor[3]);
 }
 
 /** @brief tensordec-plugin's GstTensorDecoderDef callback */
@@ -238,34 +283,59 @@ landmark_decode (void **pdata, const GstTensorsConfig * config,
 {
   GstMapInfo out_info;
   GstMemory *out_mem;
+  GstBuffer *temp_buf;
+  gint num_detection = 0, i;
+  GstTensorMetaInfo meta;
+  GstTensorsConfig *p_config = *pdata;
 
   const GstTensorMemory *mem_locations, *mem_scores;
   gboolean need_output_alloc;
-
   GArray *results = NULL;
-  const size_t size = (size_t) sizeof(float) * 8; /* 2 * [l, t, w, h] */
-
+  size_t hsize, dsize, size;
   int locations_idx, scores_idx;
+
+  p_config->rate_d = config->rate_d;
+  p_config->rate_n = config->rate_n;
+  p_config->info.info[0].dimension[0] = 4;
+  p_config->info.info[0].name = g_strdup ("eyes");
+  p_config->info.info[0].type = _NNS_FLOAT32;
+  p_config->info.num_tensors = 1;
+  p_config->info.format = config->info.format;
+
+    for (i = 1; i < NNS_TENSOR_RANK_LIMIT; i++) {
+    p_config->info.info[0].dimension[i] = 1;
+  }
+
+  GST_WARNING("%d", (int)p_config->info.info[0].dimension[0]);
+  GST_WARNING("%d", (int)p_config->info.info[0].dimension[1]);
+
+  gst_tensor_info_convert_to_meta(&p_config->info.info[0], &meta);
+  hsize = gst_tensor_meta_info_get_header_size(&meta);
+  dsize = gst_tensor_info_get_size(&(p_config->info.info[0]));
+  size  = hsize + dsize;
+  GST_WARNING("%d", (int)hsize);
+  GST_WARNING("%d", (int)dsize);
 
   g_assert (outbuf);
   need_output_alloc = gst_buffer_get_size (outbuf) == 0;
 
   /* Ensure we have outbuf properly allocated */
-  if (need_output_alloc) {
-    out_mem = gst_allocator_alloc (NULL, size, NULL);
-  } else {
-    if (gst_buffer_get_size (outbuf) < size) {
-      gst_buffer_set_size (outbuf, size);
-    }
-    out_mem = gst_buffer_get_all_memory (outbuf);
-  }
-  if (!gst_memory_map (out_mem, &out_info, GST_MAP_WRITE)) {
-    ml_loge ("Cannot map output memory / tensordec-landmark.\n");
-    goto error_free;
+  if (!need_output_alloc && gst_buffer_get_size (outbuf) < size) {
+    gst_buffer_set_size (outbuf, size);
   }
 
-  /** reset the buffer with 0.0 */
+  /** memory allocate */
+  out_mem = gst_allocator_alloc (NULL, size, NULL);
+
+  if (!gst_memory_map (out_mem, &out_info, GST_MAP_WRITE)) {
+    gst_memory_unref (out_mem);
+    ml_loge ("Cannot map output memory / tensordec-landmark.\n");
+    return GST_FLOW_ERROR;
+  }
+
   memset (out_info.data, 0, size);
+
+  /** face detection */
   locations_idx = LANDMARK_IDX_LOCATIONS_DEFAULT;
   scores_idx = LANDMARK_IDX_SCORES_DEFAULT;
 
@@ -287,25 +357,27 @@ landmark_decode (void **pdata, const GstTensorsConfig * config,
       g_assert (0);
   }
 
-  UNUSED (pdata);
-  UNUSED (config);
-
-  tensorize_face (&out_info, results);
+  /** memory write */
+  tensorize_face (&out_info, results, hsize);
+  memcpy(out_info.data, &meta, sizeof(GstTensorMetaInfo));
   g_array_free (results, TRUE);
 
   gst_memory_unmap (out_mem, &out_info);
 
-  if (need_output_alloc)
+
+  if (need_output_alloc) {
     gst_buffer_append_memory (outbuf, out_mem);
-  else
-    gst_memory_unref (out_mem);
+  } else {
+    temp_buf = gst_buffer_new ();
+    gst_buffer_append_memory(temp_buf, out_mem);
+    gst_buffer_copy_into(outbuf, temp_buf, GST_BUFFER_COPY_DEEP,0,-1);
+    // gst_buffer_unref (temp_buf);
+    // gst_memory_unref (out_mem);
+    // gst_memory_unref (meta_mem);
+  }
 
+  UNUSED (config);
   return GST_FLOW_OK;
-
-error_free:
-  gst_memory_unref (out_mem);
-
-  return GST_FLOW_ERROR;
 }
 
 static gchar decoder_subplugin_landmark_detecting[] = "landmark_detecting";
