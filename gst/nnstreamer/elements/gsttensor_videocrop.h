@@ -29,12 +29,13 @@
  * @bug		need to test.
  *
  */
-#ifndef __GST_VIDEO_CROP_H__
-#define __GST_VIDEO_CROP_H__
+#ifndef __GST_TENSOR_VIDEO_CROP_H__
+#define __GST_TENSOR_VIDEO_CROP_H__
 
 #include <gst/gst.h>
 #include <gst/video/gstvideofilter.h>
 #include <tensor_common.h>
+#include <tensor_data.h>
 
 #define VIDEO_CROP_FORMATS_PACKED_SIMPLE "RGB, BGR, RGB16, RGB15, " \
   "RGBx, xRGB, BGRx, xBGR, RGBA, ARGB, BGRA, ABGR, " \
@@ -75,7 +76,7 @@ G_BEGIN_DECLS
 #define GST_IS_TENSOR_VIDEO_CROP_CLASS(klass) \
   (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_TENSOR_VIDEO_CROP))
 
-GST_ELEMENT_REGISTER_DECLARE (videocrop);
+GST_ELEMENT_REGISTER_DECLARE (tensor_video_crop);
 
 typedef enum
 {

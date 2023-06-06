@@ -47,16 +47,18 @@
 #include "config.h"
 #endif
 
-#include <gst/gst.h>
-#include <gst/video/video.h>
 #include <nnstreamer_util.h>
+#include <nnstreamer_plugin_api_decoder.h>
+#include <nnstreamer_plugin_api.h>
+#include <nnstreamer_log.h>
 
 #include "gsttensor_videocrop.h"
+#include <gst/video/video.h>
 #include <string.h>
 
-GST_DEBUG_CATEGORY_STATIC (videocrop_debug);
+GST_DEBUG_CATEGORY_STATIC (tensor_video_crop_debug);
 
-#define GST_CAT_DEFAULT videocrop_debug
+#define GST_CAT_DEFAULT tensor_video_crop_debug
 
 typedef struct
 {
@@ -79,7 +81,7 @@ static GstStaticPadTemplate raw_template = GST_STATIC_PAD_TEMPLATE ("raw",
     GST_STATIC_CAPS (VIDEO_CROP_CAPS)
     );
 
-static GstStaticPadTemplate info_templ = GST_STATIC_PAD_TEMPLATE ("info",
+static GstStaticPadTemplate info_template = GST_STATIC_PAD_TEMPLATE ("info",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
     GST_STATIC_CAPS (CROP_INFO_CAPS));
@@ -88,7 +90,7 @@ static GstStaticPadTemplate info_templ = GST_STATIC_PAD_TEMPLATE ("info",
 
 G_DEFINE_TYPE (GstTensorVideoCrop, gst_tensor_video_crop, GST_TYPE_VIDEO_FILTER);
 GST_ELEMENT_REGISTER_DEFINE (gst_tensor_video_crop, "tensor_videocrop", GST_RANK_NONE,
-    GST_TYPE_VIDEO_CROP);
+    GST_TYPE_TENSOR_VIDEO_CROP);
 
 static void gst_tensor_video_crop_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec);
@@ -101,8 +103,11 @@ static GstCaps *gst_tensor_video_crop_transform_caps (GstBaseTransform * trans,
     GstPadDirection direction, GstCaps * caps, GstCaps * filter_caps);
 static gboolean gst_tensor_video_crop_src_event (GstBaseTransform * trans,
     GstEvent * event);
-static gboolean gst_tensor_video_crop_sink_even (GstPad * pad, GstObject * parent,
+static gboolean gst_tensor_video_crop_sink_event (GstPad * pad, GstObject * parent,
     GstEvent * event);
+
+static gboolean gst_tensor_video_crop_sink_chain (GstPad * pad, GstObject * parent,
+    GstBuffer * buf);
 
 static gboolean gst_tensor_video_crop_set_info (GstVideoFilter * vfilter, GstCaps * in,
     GstVideoInfo * in_info, GstCaps * out, GstVideoInfo * out_info);
@@ -116,11 +121,8 @@ static gboolean gst_tensor_video_crop_propose_allocation (GstBaseTransform * tra
 static GstFlowReturn gst_tensor_video_crop_transform_ip (GstBaseTransform * trans,
     GstBuffer * buf);
 
-static gboolean gst_tensor_crop_src_event (GstBaseTransform * trans, GstEvent * event);
-
-
 static void
-gst_tensor_video_crop_class_init (GstVideoCropClass * klass)
+gst_tensor_video_crop_class_init (GstTensorVideoCropClass * klass)
 {
   GObjectClass *gobject_class;
   GstElementClass *element_class;
@@ -138,8 +140,9 @@ gst_tensor_video_crop_class_init (GstVideoCropClass * klass)
   gst_element_class_add_static_pad_template (element_class, &info_template);
   gst_element_class_add_static_pad_template (element_class, &raw_template);
   gst_element_class_add_static_pad_template (element_class, &src_template);
-  gst_element_class_set_static_metadata (element_class, "TensorCrop",
-      "Filter/Effect/Video",
+  gst_element_class_set_static_metadata (element_class,
+      "TensorVideoCrop",
+      "Crop/Video/Tensor",
       "Crops video into a tensor-defined region",
       "Kiwoong Kim");
 
@@ -164,7 +167,7 @@ gst_tensor_video_crop_class_init (GstVideoCropClass * klass)
 static void
 gst_tensor_video_crop_init (GstTensorVideoCrop * tvcrop)
 {
-  GST_DEBUG_CATEGORY_INIT (videocrop_debug, "videocrop", 0, "videocrop");
+  GST_DEBUG_CATEGORY_INIT (tensor_video_crop_debug, "tensor_videocrop", 0, "videocrop");
 
   tvcrop->prop_left = -1;
   tvcrop->prop_top = -1;
@@ -184,10 +187,13 @@ gst_tensor_video_crop_transform_packed_complex (GstTensorVideoCrop * tvcrop,
     GstVideoFrame * in_frame, GstVideoFrame * out_frame, gint x, gint y)
 {
   guint8 *in_data, *out_data;
-  guint i, dx;
-  gint width, height;
+  guint  dx;
+  gint i, width, height;
   gint in_stride;
   gint out_stride;
+
+  UNUSED (x);
+  UNUSED (y);
 
   width = GST_VIDEO_FRAME_WIDTH (out_frame);
   height = GST_VIDEO_FRAME_HEIGHT (out_frame);
@@ -202,10 +208,12 @@ gst_tensor_video_crop_transform_packed_complex (GstTensorVideoCrop * tvcrop,
 
   /** init tensor infos */
   tvcrop->sinkpad_info =
-      gst_pad_new_from_static_template (&info_templ, "info");
+      gst_pad_new_from_static_template (&info_template, "info");
   gst_element_add_pad (GST_ELEMENT (tvcrop), tvcrop->sinkpad_info);
-  gst_pad_set_event_function (tvcrop->sinkpad,
+  gst_pad_set_event_function (tvcrop->sinkpad_info,
     GST_DEBUG_FUNCPTR (gst_tensor_video_crop_sink_event));
+  gst_pad_set_chain_function (tvcrop->sinkpad_info,
+    GST_DEBUG_FUNCPTR (gst_tensor_video_crop_sink_chain));
 
   gst_tensors_config_init (&tvcrop->tensors_config);
 
@@ -247,8 +255,8 @@ gst_tensor_video_crop_transform_packed_simple (GstTensorVideoCrop * tvcrop,
 {
   guint8 *in_data, *out_data;
   gint width, height;
-  guint i, dx;
-  gint in_stride, out_stride;
+  guint dx;
+  gint i, in_stride, out_stride;
 
   width = GST_VIDEO_FRAME_WIDTH (out_frame);
   height = GST_VIDEO_FRAME_HEIGHT (out_frame);
@@ -332,10 +340,10 @@ gst_tensor_video_crop_transform_semi_planar (GstTensorVideoCrop * tvcrop,
     GstVideoFrame * in_frame, GstVideoFrame * out_frame, gint x, gint y)
 {
   gint width, height;
-  gint crop_top, crop_left;
+  gint i, crop_top, crop_left;
   guint8 *y_out, *uv_out;
   guint8 *y_in, *uv_in;
-  guint i, dx;
+  guint dx;
 
   width = GST_VIDEO_FRAME_WIDTH (out_frame);
   height = GST_VIDEO_FRAME_HEIGHT (out_frame);
@@ -414,7 +422,7 @@ gst_tensor_video_crop_transform_frame (GstVideoFilter * vfilter,
 static gboolean
 gst_tensor_video_crop_decide_allocation (GstBaseTransform * trans, GstQuery * query)
 {
-  GstVideoCrop *crop = GST_TENSOR_VIDEO_CROP (trans);
+  GstTensorVideoCrop *crop = GST_TENSOR_VIDEO_CROP (trans);
   gboolean use_crop_meta;
 
   use_crop_meta = (gst_query_find_allocation_meta (query,
@@ -579,7 +587,7 @@ gst_tensor_video_crop_transform_dimension_value (const GValue * src_val,
       gst_value_set_int_range (dest_val, min, max);
     }
   } else if (GST_VALUE_HOLDS_LIST (src_val)) {
-    gint i;
+    guint i;
 
     g_value_init (dest_val, GST_TYPE_LIST);
 
@@ -622,8 +630,8 @@ gst_tensor_video_crop_transform_caps (GstBaseTransform * trans,
   GST_LOG_OBJECT (self, "l=%f,t=%f,w=%f,h=%f",
       self->prop_left, self->prop_top, self->prop_width, self->prop_height);
 
-  width = GST_VIDEO_INFO_WIDTH(self->in_info)
-  height = GST_VIDEO_INFO_HEIGHT(self->in_info)
+  width = self->in_info.width;
+  height = self->in_info.height;
 
   w_dynamic = (self->prop_left < 0 || self->prop_width < 0);
   h_dynamic = (self->prop_top < 0 || self->prop_height < 0);
@@ -647,7 +655,7 @@ gst_tensor_video_crop_transform_caps (GstBaseTransform * trans,
 
   other_caps = gst_caps_new_empty ();
 
-  for (i = 0; i < gst_caps_get_size (caps); ++i) {
+  for (i = 0; i < (gint) gst_caps_get_size (caps); ++i) {
     const GValue *v;
     GstStructure *structure, *new_structure;
     GValue w_val = G_VALUE_INIT, h_val = G_VALUE_INIT;
@@ -659,7 +667,7 @@ gst_tensor_video_crop_transform_caps (GstBaseTransform * trans,
     v = gst_structure_get_value (structure, "width");
     if (!gst_tensor_video_crop_transform_dimension_value (v, dx, &w_val, direction,
             w_dynamic)) {
-      GST_WARNING_OBJECT (vcrop, "could not transform width value with dx=%d"
+      GST_WARNING_OBJECT (self, "could not transform width value with dx=%d"
           ", caps structure=%" GST_PTR_FORMAT, dx, structure);
       continue;
     }
@@ -668,7 +676,7 @@ gst_tensor_video_crop_transform_caps (GstBaseTransform * trans,
     if (!gst_tensor_video_crop_transform_dimension_value (v, dy, &h_val, direction,
             h_dynamic)) {
       g_value_unset (&w_val);
-      GST_WARNING_OBJECT (vcrop, "could not transform height value with dy=%d"
+      GST_WARNING_OBJECT (self, "could not transform height value with dy=%d"
           ", caps structure=%" GST_PTR_FORMAT, dy, structure);
       continue;
     }
@@ -679,7 +687,7 @@ gst_tensor_video_crop_transform_caps (GstBaseTransform * trans,
     g_value_unset (&w_val);
     g_value_unset (&h_val);
 
-    GST_LOG_OBJECT (vcrop, "transformed structure %2d: %" GST_PTR_FORMAT
+    GST_LOG_OBJECT (self, "transformed structure %2d: %" GST_PTR_FORMAT
         " => %" GST_PTR_FORMAT "features %" GST_PTR_FORMAT, i, structure,
         new_structure, features);
     gst_caps_append_structure (other_caps, new_structure);
@@ -702,7 +710,7 @@ static gboolean
 gst_tensor_video_crop_set_info (GstVideoFilter * vfilter, GstCaps * in,
     GstVideoInfo * in_info, GstCaps * out, GstVideoInfo * out_info)
 {
-  GstTensorVideoCrop *self = GST_VIDEO_CROP (vfilter);
+  GstTensorVideoCrop *self = GST_TENSOR_VIDEO_CROP (vfilter);
   GstCapsFeatures *features;
   int dx, dy, width, height, left, top;
   width = GST_VIDEO_INFO_WIDTH (in_info);
@@ -710,11 +718,11 @@ gst_tensor_video_crop_set_info (GstVideoFilter * vfilter, GstCaps * in,
 
   GST_OBJECT_LOCK (self);
   self->need_update = FALSE;
-  self->left = left = (self->prop_left < 0) ? 0 : (int) (self->prop_left * width);
-  self->right = (self->prop_width < 0) ? 0 : left + (int)(self->prop_width * width);
-  self->top = top = (self->prop_top < 0) ? 0 : (int) (self->prop_top * height);
-  self->bottom = (self->prop_height < 0) ? 0 : top + (int)(self->prop_height * height);
-  GST_OBJECT_UNLOCK (crop);
+  self->crop_left = left = (self->prop_left < 0) ? 0 : (int) (self->prop_left * width);
+  self->crop_right = (self->prop_width < 0) ? 0 : left + (int)(self->prop_width * width);
+  self->crop_top = top = (self->prop_top < 0) ? 0 : (int) (self->prop_top * height);
+  self->crop_bottom = (self->prop_height < 0) ? 0 : top + (int)(self->prop_height * height);
+  GST_OBJECT_UNLOCK (self);
 
   dx = GST_VIDEO_INFO_WIDTH (in_info) - GST_VIDEO_INFO_WIDTH (out_info);
   dy = GST_VIDEO_INFO_HEIGHT (in_info) - GST_VIDEO_INFO_HEIGHT (out_info);
@@ -879,7 +887,7 @@ gst_tensor_video_crop_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
 {
   GstTensorVideoCrop *self;
-
+  UNUSED (value);
   self = GST_TENSOR_VIDEO_CROP (object);
 
   GST_OBJECT_LOCK (self);
@@ -899,6 +907,7 @@ gst_tensor_video_crop_get_property (GObject * object, guint prop_id, GValue * va
     GParamSpec * pspec)
 {
   GstTensorVideoCrop *self;
+  UNUSED (value);
 
   self = GST_TENSOR_VIDEO_CROP (object);
 
@@ -962,8 +971,7 @@ gst_tensor_video_crop_get_info (GstTensorVideoCrop * self, GstBuffer * info,
   GstMapInfo map;
   GstTensorMetaInfo meta;
   gsize hsize, dsize, esize;
-  guint i, j;
-  guint8 *src, *desc;
+  guint i;
   gboolean ret = FALSE;
 
   i = gst_buffer_n_memory (info);
@@ -1029,10 +1037,8 @@ gst_tensor_video_crop_sink_chain (GstPad * pad, GstObject * parent, GstBuffer * 
 {
   GstFlowReturn ret = GST_FLOW_OK;
   GstTensorVideoCrop *self;
-  GstTensorPad *tensorpad;
   tensor_video_crop_info_s vcinfo;
-  GList *list = NULL;
-  guint num_tensors, i;
+  guint num_tensors;
   UNUSED (pad);
   self = GST_TENSOR_VIDEO_CROP (parent);
 
@@ -1054,14 +1060,10 @@ gst_tensor_video_crop_sink_chain (GstPad * pad, GstObject * parent, GstBuffer * 
   } else {
     
     GST_OBJECT_LOCK (self);
-
-    GST_LOG_OBJECT (self, "l=%f,t=%f,w=%f,h=%f",
-        vcinfo->left, vcinfo->top, vcinfo->width, vcinfo->height);
-
-    self->prop_left = vcinfo->left;
-    self->prop_top = vcinfo->top;
-    self->prop_width = vcinfo->width;
-    self->prop_height = vcinfo->height;
+    self->prop_left = vcinfo.left;
+    self->prop_top = vcinfo.top;
+    self->prop_width = vcinfo.width;
+    self->prop_height = vcinfo.height;
     GST_OBJECT_UNLOCK (self);
   }
   if (buf)

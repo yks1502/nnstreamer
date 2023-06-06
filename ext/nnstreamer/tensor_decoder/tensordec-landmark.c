@@ -77,19 +77,17 @@ typedef struct
 #define _get_faces(_type, typename, locationinput, scoreinput, config, results) \
   case typename: \
   { \
-    int d, num; \
+    int d; \
     size_t boxbpi; \
     _type * locations_ = (_type *) locationinput; \
     _type * scores_ = (_type *) scoreinput; \
-    int locations_idx =  LANDMARK_IDX_LOCATIONS; \
-    results = g_array_sized_new (FALSE, TRUE, sizeof (detectedFace), num); \
+    int locations_idx =  LANDMARK_IDX_LOCATIONS_DEFAULT; \
+    results = g_array_sized_new (FALSE, TRUE, sizeof (detectedFace), 896); \
     boxbpi = config->info.info[locations_idx].dimension[0]; \
-    for (d = 0; d < num; d++) { \
+    for (d = 0; d < 896; d++) { \
       detectedFace face; \
       if (scores_[d] < 80) \
         continue; \
-      face.x = (int) (x1 * bb->i_width); \
-      face.y = (int) (y1 * bb->i_height); \
       face.ymin = locations_[d * boxbpi + 1]; \
       face.xmin = locations_[d * boxbpi + 1]; \
       face.ymax = locations_[d * boxbpi + 1]; \
@@ -209,7 +207,7 @@ static void
 tensorize_face (GstMapInfo * out_info, GArray * results)
 {
    /* Let's draw per pixel (4bytes) */
-  float32_t *out_tensor = (float32_t *) out_info->data;
+  float *out_tensor = (float *) out_info->data;
   unsigned int i, best_idx;
   float best_score = 0;
   detectedFace *best_face;
@@ -222,11 +220,15 @@ tensorize_face (GstMapInfo * out_info, GArray * results)
     }
   }
   best_face = &g_array_index (results, detectedFace, best_idx);
-
-  detectedEye left_eye, right_eye;
-
   /** @todo: convert best_face to eye */
-
+  out_tensor[0] = best_face->left_eye_x;
+  out_tensor[1] = best_face->left_eye_y;
+  out_tensor[2] = 0.2;
+  out_tensor[3] = 0.2;
+  out_tensor[4] = best_face->right_eye_x - 0.2;
+  out_tensor[5] = best_face->right_eye_y - 0.2;
+  out_tensor[2] = 0.2;
+  out_tensor[3] = 0.2;
 }
 
 /** @brief tensordec-plugin's GstTensorDecoderDef callback */
@@ -236,10 +238,14 @@ landmark_decode (void **pdata, const GstTensorsConfig * config,
 {
   GstMapInfo out_info;
   GstMemory *out_mem;
-  GArray *results = NULL;
-  const size_t size = (size_t) sizeof(float32_t) * 8; /* 2 * [l, t, w, h] */
-  const guint num_tensors = config->info.num_tensors;
+
+  const GstTensorMemory *mem_locations, *mem_scores;
   gboolean need_output_alloc;
+
+  GArray *results = NULL;
+  const size_t size = (size_t) sizeof(float) * 8; /* 2 * [l, t, w, h] */
+
+  int locations_idx, scores_idx;
 
   g_assert (outbuf);
   need_output_alloc = gst_buffer_get_size (outbuf) == 0;
@@ -260,18 +266,13 @@ landmark_decode (void **pdata, const GstTensorsConfig * config,
 
   /** reset the buffer with 0.0 */
   memset (out_info.data, 0, size);
-
-  const GstTensorMemory *mem_locations, *mem_scores;
-  int locations_idx, scores_idx;
-
   locations_idx = LANDMARK_IDX_LOCATIONS_DEFAULT;
-      
   scores_idx = LANDMARK_IDX_SCORES_DEFAULT;
 
-  mem_scores = &input[scores_idx];
   mem_locations = &input[locations_idx];
+  mem_scores = &input[scores_idx];
 
-  switch (config->info.info[num_idx].type) {
+  switch (config->info.info[locations_idx].type) {
       _get_faces_ (uint8_t, _NNS_UINT8);
       _get_faces_ (int8_t, _NNS_INT8);
       _get_faces_ (uint16_t, _NNS_UINT16);
@@ -289,10 +290,6 @@ landmark_decode (void **pdata, const GstTensorsConfig * config,
   UNUSED (pdata);
   UNUSED (config);
 
-  if (bdata->is_track != 0) {
-    update_centroids (pdata, results);
-  }
-
   tensorize_face (&out_info, results);
   g_array_free (results, TRUE);
 
@@ -305,8 +302,6 @@ landmark_decode (void **pdata, const GstTensorsConfig * config,
 
   return GST_FLOW_OK;
 
-error_unmap:
-  gst_memory_unmap (out_mem, &out_info);
 error_free:
   gst_memory_unref (out_mem);
 
