@@ -69,6 +69,7 @@ NNSTREAMER_PLUGINS_SRCS := \
     $(NNSTREAMER_GST_HOME)/elements/gsttensor_split.c \
     $(NNSTREAMER_GST_HOME)/elements/gsttensor_trainer.c \
     $(NNSTREAMER_GST_HOME)/elements/gsttensor_transform.c \
+    $(NNSTREAMER_GST_HOME)/elements/gsttensor_videocrop.c \
     $(NNSTREAMER_GST_HOME)/tensor_filter/tensor_filter.c
 
 # tensor-query element with nnstreamer-edge

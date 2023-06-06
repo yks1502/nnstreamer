@@ -40,7 +40,7 @@ void init_landmark (void) __attribute__ ((constructor));
 void fini_landmark (void) __attribute__ ((destructor));
 
 #define DECODER_LANDMARK_TEXT_CAPS_STR \
-    "text/x-raw, format = (string) utf8"
+    GST_TENSOR_CAP_DEFAULT ";" GST_TENSORS_CAP_WITH_NUM ("1")
 
 #define LANDMARK_IDX_LOCATIONS_DEFAULT 0
 #define LANDMARK_IDX_SCORES_DEFAULT 1

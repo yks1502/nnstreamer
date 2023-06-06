@@ -75,7 +75,7 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE ("src",
     GST_STATIC_CAPS (VIDEO_CROP_CAPS)
     );
 
-static GstStaticPadTemplate raw_template = GST_STATIC_PAD_TEMPLATE ("raw",
+static GstStaticPadTemplate raw_template = GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
     GST_STATIC_CAPS (VIDEO_CROP_CAPS)
