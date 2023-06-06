@@ -204,12 +204,16 @@ eye_decode (void **pdata, const GstTensorsConfig * config,
 
   /* @todo apply offset to each dot */
   data = &input[0];
-  for (i = 0; i < num_eye_tensor; i++)
-    out_data[2 + i] = ((float*) data->data)[i];
+  for (i = 0; i < num_eye_tensor; i++) {
+    out_data[2 + 2*i] = ((float*) data->data)[3*i];
+    out_data[2 + 2*i + 1] = ((float*) data->data)[3*i + 1];
+  }
 
   data = &input[1];
-  for (i = 0; i < num_pupil_tensor; i++)
-    out_data[2 + num_eye_tensor + i] = ((float*) data->data)[i];
+  for (i = 0; i < num_pupil_tensor; i++) {
+    out_data[(2 + 2*num_eye_tensor) + (2*i)] = ((float*) data->data)[3*i];
+    out_data[(2 + 2*num_eye_tensor) + (2*i + 1)] = ((float*) data->data)[3*i + 1];
+  }
 
   gst_memory_unmap (out_mem, &out_info);
   gst_buffer_append_memory (outbuf, out_mem);
