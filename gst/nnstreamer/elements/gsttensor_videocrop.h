@@ -107,9 +107,9 @@ struct _GstTensorVideoCrop
 
   /*< private > */
   gfloat prop_left;
+  gfloat prop_right;
   gfloat prop_top;
-  gfloat prop_width;
-  gfloat prop_height;
+  gfloat prop_bottom;
   gboolean need_update;
 
   GstPad *sinkpad_info;
