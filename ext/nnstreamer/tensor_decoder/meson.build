@@ -98,7 +98,8 @@ static_library('nnstreamer_decoder_image_segment',
 # eye detecting
 decoder_sub_eye_detecting_sources = [
   'tensordec-eye.c',
-  'tensordecutil.c'
+  'tensordecutil.c',
+  'tensordec-font.c'
 ]
 
 shared_library('nnstreamer_decoder_eye_detecting',
@@ -112,7 +113,7 @@ static_library('nnstreamer_decoder_eye_detecting',
   dependencies: [nnstreamer_dep, glib_dep, gst_dep],
   install: true,
   install_dir: nnstreamer_libdir
-) 
+)
 
 # landmark detecting
 decoder_sub_landmark_detecting_sources = [

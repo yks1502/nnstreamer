@@ -40,32 +40,67 @@
 void init_eye (void) __attribute__ ((constructor));
 void fini_eye (void) __attribute__ ((destructor));
 
+/* font.c */
+extern uint8_t rasters[][13];
+
+#define NUM_EYE_TENSOR                           (71)
+#define NUM_PUPIL_TENSOR                         (5)
+#define DEFAULT_WIDTH                            (64)
+#define DEFAULT_HEIGHT                           (64)
+#define EYE_PIXEL_VALUE                          (0xFF0000FF)    /* RED 100% in RGBA */
+#define PUPIL_PIXEL_VALUE                        (0x0000FFFF)    /* BLUE 100% in RGBA */
+
 #define DECODER_EYE_TEXT_CAPS_STR \
     "text/x-raw, format = (string) utf8"
 
 #define DECODER_EYE_TENSOR_CAPS_STR \
     "other/tensors, num_tensors = (int) 1, types = (string) uint32, dimensions = (string) 154:1:1:1, format = (string) static"
 
+/**
+ * @todo Fill in the value at build time or hardcode this. It's const value
+ * @brief The bitmap of characters
+ * [Character (ASCII)][Height][Width]
+ */
+static singleLineSprite_t singleLineSprite;
+
 /** @brief Internal data structure for output video width and height */
 typedef struct
 {
   guint width;
   guint height;
-} SizeData;
+
+  GArray *eye_tensor_x;
+  GArray *eye_tensor_y;
+
+  GArray *pupil_tensor_x;
+  GArray *pupil_tensor_y;
+} eye_data;
 
 /** @brief tensordec-plugin's GstTensorDecoderDef callback */
 static int
 eye_init (void **pdata)
 {
-  SizeData *data;
-  data = *pdata = g_new0 (SizeData, 1);
+  eye_data *data;
+  data = *pdata = g_new0 (eye_data, 1);
   if (*pdata == NULL) {
     GST_ERROR ("Failed to allocate memory for decoder subplugin.");
     return FALSE;
   }
 
-  data->width = 64;
-  data->height = 64;
+  data->width = DEFAULT_WIDTH;
+  data->height = DEFAULT_HEIGHT;
+
+  data->eye_tensor_x =
+    g_array_sized_new (TRUE, TRUE, sizeof (guint), NUM_EYE_TENSOR);
+  data->eye_tensor_y =
+    g_array_sized_new (TRUE, TRUE, sizeof (guint), NUM_EYE_TENSOR);
+
+  data->pupil_tensor_x =
+    g_array_sized_new (TRUE, TRUE, sizeof (guint), NUM_PUPIL_TENSOR);
+  data->pupil_tensor_y =
+    g_array_sized_new (TRUE, TRUE, sizeof (guint), NUM_PUPIL_TENSOR);
+
+  initSingleLineSprite (singleLineSprite, rasters, EYE_PIXEL_VALUE);
 
   return TRUE;
 }
@@ -74,6 +109,13 @@ eye_init (void **pdata)
 static void
 eye_exit (void **pdata)
 {
+  eye_data *data = *pdata;
+
+  g_array_free (data->eye_tensor_x, TRUE);
+  g_array_free (data->eye_tensor_y, TRUE);
+  g_array_free (data->pupil_tensor_x, TRUE);
+  g_array_free (data->pupil_tensor_y, TRUE);
+
   g_free (*pdata);
   *pdata = NULL;
 }
@@ -82,15 +124,15 @@ eye_exit (void **pdata)
 static int
 eye_setOption (void **pdata, int opNum, const char *param)
 {
-  SizeData *data = *pdata;
+  eye_data *data = *pdata;
 
   if (opNum == 0) {
     /* option1 = output video size (width:height) */
     tensor_dim dim;
     int rank = gst_tensor_parse_dimension (param, dim);
 
-    data->width = 64;
-    data->height = 64;
+    data->width = DEFAULT_WIDTH;
+    data->height = DEFAULT_HEIGHT;
     if (param == NULL || *param == '\0')
       return TRUE;
 
@@ -118,10 +160,9 @@ eye_setOption (void **pdata, int opNum, const char *param)
 static GstCaps *
 eye_getOutCaps (void **pdata, const GstTensorsConfig * config)
 {
-  SizeData *data = *pdata;
+  eye_data *data = *pdata;
   GstCaps *caps;
   int num_tensors, d, i;
-
 
   g_return_val_if_fail (config != NULL, NULL);
 
@@ -162,26 +203,56 @@ eye_getTransformSize (void **pdata, const GstTensorsConfig * config,
   /** @todo Use max_word_length if that's appropriate */
 }
 
+/**
+ * @brief Draw with the given results (eye) to the output buffer
+ * @param[out] out_info The output buffer (RGBA plain)
+ * @param[in] data The eye internal data.
+ */
+static void
+draw (GstMapInfo * out_info, eye_data * data)
+{
+  uint32_t *frame = (uint32_t *) out_info->data;
+  guint i;
+
+  for (i = 0; i < data->eye_tensor_x->len; i++) {
+    guint *pos_x = &g_array_index (data->eye_tensor_x, guint, i);
+    guint *pos_y = &g_array_index (data->eye_tensor_y, guint, i);
+
+    uint32_t *pos = &frame[(*pos_y) * data->width + (*pos_x)];
+    *pos = EYE_PIXEL_VALUE;
+  }
+
+  for (i = 0; i < data->pupil_tensor_x->len; i++) {
+    guint *pos_x = &g_array_index (data->pupil_tensor_x, guint, i);
+    guint *pos_y = &g_array_index (data->pupil_tensor_y, guint, i);
+
+    uint32_t *pos = &frame[(*pos_y) * data->width + (*pos_x)];
+    *pos = PUPIL_PIXEL_VALUE;
+  }
+}
+
 /** @brief tensordec-plugin's GstTensorDecoderDef callback */
 static GstFlowReturn
 eye_decode (void **pdata, const GstTensorsConfig * config,
     const GstTensorMemory * input, GstBuffer * outbuf)
 {
+  eye_data *data = *pdata;
+  const size_t size = (size_t) data->width * data->height * 4;
   GstMapInfo out_info;
   GstMemory *out_mem;
-  size_t size;
-  const GstTensorMemory  *data;
-  SizeData *size_data = *pdata;
-  int num_eye_tensor, num_pupil_tensor;
-  int i;
-  uint32_t *out_data;
+  const GstTensorMemory *in_data;
+  guint i, num_pupil_tensor, num_eye_tensor;
 
   num_pupil_tensor = (config->info.info[0].dimension[0]);
   num_eye_tensor = (config->info.info[1].dimension[0]);
 
-  /* [width, height, x_1, y_1, ..., x_76, y_76] */
-  size = (size_t) sizeof(uint32_t) * 2 * (1 + num_eye_tensor + num_pupil_tensor);
+  g_array_set_size (data->eye_tensor_x, num_eye_tensor);
+  g_array_set_size (data->eye_tensor_y, num_eye_tensor);
+  g_array_set_size (data->pupil_tensor_x, num_pupil_tensor);
+  g_array_set_size (data->pupil_tensor_y, num_pupil_tensor);
 
+  g_assert (outbuf); /** GST Internal Bug */
+  /* Ensure we have outbuf properly allocated */
   if (gst_buffer_get_size (outbuf) == 0) {
     out_mem = gst_allocator_alloc (NULL, size, NULL);
   } else {
@@ -196,27 +267,33 @@ eye_decode (void **pdata, const GstTensorsConfig * config,
     gst_memory_unref (out_mem);
     return GST_FLOW_ERROR;
   }
-
-  out_data = (uint32_t *) out_info.data;
-
-  out_data[0] = size_data->width;
-  out_data[1] = size_data->height;
+  /** reset the buffer with alpha 0 / black */
+  memset (out_info.data, 0, size);
 
   /* @todo apply offset to each dot */
-  data = &input[0];
+  in_data = &input[0];
   for (i = 0; i < num_eye_tensor; i++) {
-    out_data[2 + 2*i] = ((float*) data->data)[3*i];
-    out_data[2 + 2*i + 1] = ((float*) data->data)[3*i + 1];
+    guint *pos_x = &g_array_index (data->eye_tensor_x, guint, i);
+    guint *pos_y = &g_array_index (data->eye_tensor_y, guint, i);
+    *pos_x = (guint)((float*) in_data->data)[3 * i];
+    *pos_y = (guint)((float*) in_data->data)[3 * i + 1];
   }
 
-  data = &input[1];
+  in_data = &input[1];
   for (i = 0; i < num_pupil_tensor; i++) {
-    out_data[(2 + 2*num_eye_tensor) + (2*i)] = ((float*) data->data)[3*i];
-    out_data[(2 + 2*num_eye_tensor) + (2*i + 1)] = ((float*) data->data)[3*i + 1];
+    guint *pos_x = &g_array_index (data->pupil_tensor_x, guint, i);
+    guint *pos_y = &g_array_index (data->pupil_tensor_y, guint, i);
+    *pos_x = (guint)((float*) in_data->data)[3 * i];
+    *pos_y = (guint)((float*) in_data->data)[3 * i + 1];
   }
+
+  draw (&out_info, data);
 
   gst_memory_unmap (out_mem, &out_info);
-  gst_buffer_append_memory (outbuf, out_mem);
+  if (gst_buffer_get_size (outbuf) == 0)
+    gst_buffer_append_memory (outbuf, out_mem);
+  else
+    gst_memory_unref (out_mem);
 
   return GST_FLOW_OK;
 }
