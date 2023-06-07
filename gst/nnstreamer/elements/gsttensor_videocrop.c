@@ -147,7 +147,6 @@ gst_tensor_video_crop_class_init (GstTensorVideoCropClass * klass)
       "Crops video into a tensor-defined region",
       "Kiwoong Kim");
 
-  GST_WARNING("CAPS");
   basetransform_class->before_transform =
       GST_DEBUG_FUNCPTR (gst_tensor_video_crop_before_transform);
   basetransform_class->transform_ip_on_passthrough = FALSE;
@@ -986,9 +985,6 @@ gst_tensor_video_crop_parse_caps (GstTensorVideoCrop * tvcrop, GstCaps * caps)
   tvcrop->tensors_config.info.num_tensors = 1;
   tvcrop->tensors_config.info.format = config.info.format;
 
-  GST_WARNING("f=%d %d, \ndimension[0]=%d\ntype=%d,format=%d",
-  config.rate_d, config.rate_n,config.info.info->dimension[0],
-  config.info.info->type, config.info.format);
 
   for (i = 1; i < NNS_TENSOR_RANK_LIMIT; i++) {
     tvcrop->tensors_config.info.info[0].dimension[i] = 1;
@@ -1006,9 +1002,6 @@ gst_tensor_video_crop_sink_event (GstPad * pad, GstObject * parent, GstEvent * e
 
   self = GST_TENSOR_VIDEO_CROP (parent);
 
-  GST_WARNING("BEGIN PARSE, goint to get tensor");
-  GST_WARNING_OBJECT (self, "l=%f,t=%f,w=%f,h=%f",
-      self->prop_left, self->prop_top, self->prop_right, self->prop_bottom);
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_CAPS:
     {
@@ -1098,10 +1091,8 @@ gst_tensor_video_crop_sink_chain (GstPad * pad, GstObject * parent, GstBuffer * 
   UNUSED (pad);
   self = GST_TENSOR_VIDEO_CROP (parent);
 
-  GST_WARNING("BEGIN PARSE, goint to get tensor");
   buf = gst_tensor_buffer_from_config (buf, &self->tensors_config);
 
-  GST_WARNING("BEGIN PARSE, goint to get tensor");
   if (gst_tensors_config_is_flexible (&self->tensors_config)) {
     /* cannot get exact number of tensors from config */
     num_tensors = gst_buffer_n_memory (buf);
@@ -1117,8 +1108,6 @@ gst_tensor_video_crop_sink_chain (GstPad * pad, GstObject * parent, GstBuffer * 
     ret = GST_FLOW_ERROR;
   }
     
-  GST_WARNING ("tensor parsed\n\nnum: %d, l=%f,t=%f,w=%f,h=%f",
-      vcinfo.num,vcinfo.left, vcinfo.top, vcinfo.width, vcinfo.height);
   GST_OBJECT_LOCK (self);
   self->prop_left = vcinfo.left;
   self->prop_top = vcinfo.top;

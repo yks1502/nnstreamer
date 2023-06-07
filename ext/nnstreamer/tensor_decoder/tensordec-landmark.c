@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <glib.h>
 #include <gst/gstinfo.h>
 #include <nnstreamer_plugin_api_decoder.h>
@@ -50,20 +51,38 @@ void fini_landmark (void) __attribute__ ((destructor));
 #define LANDMARK_IDX_SCORES_DEFAULT 1
 #define LANDMARK_THRESHOLD_DEFAULT G_MINFLOAT
 
+#define SCORE_THRESHOLD 0.7
+#define DIMENSION_TOTAL 896
+#define INPUT_SIZE_DEFAULT 128
+#define OFFSET_DEFAULT 0.5
+#define NUM_LAYERS_DEFAULT 4
+#define NUM_LAYERS_MAXIMUM 4
+#define MIN_SCALE_DEFAULT 0.15625
+#define MAX_SCALE_DEFAULT 0.75
+
 #define SELECT_LEFT_EYE 0
 #define SELECT_RIGHT_EYE 1
 
 typedef struct {
   GstTensorsConfig config;
-  int selection;
+  GArray *anchors;
+  gint selection;
+  gint input_size;
+  gint num_layers;
+  gint strides[4];
+  gfloat offset_x;
+  gfloat offset_y;
+  gfloat min_scale;
+  gfloat max_scale;
+  gint generated;
 } landmarkPluginData;
 
 typedef struct {
-  float left;
-  float top;
-  float width;
-  float height;
-} detectedEye;
+  float x_center;
+  float y_center;
+  float w;
+  float h;
+} anchor;
 
 typedef struct
 {
@@ -84,6 +103,7 @@ typedef struct
   float left_ear_x;
   float left_ear_y;
   float score;
+  int index;
 } detectedFace;
 
 #define _get_faces(_type, typename, locationinput, scoreinput, config, results) \
@@ -94,11 +114,12 @@ typedef struct
     _type * locations_ = (_type *) locationinput; \
     _type * scores_ = (_type *) scoreinput; \
     int locations_idx =  LANDMARK_IDX_LOCATIONS_DEFAULT; \
-    results = g_array_sized_new (FALSE, TRUE, sizeof (detectedFace), 896); \
+    float threshold = log (SCORE_THRESHOLD / (1 - SCORE_THRESHOLD)); \
+    results = g_array_sized_new (FALSE, TRUE, sizeof (detectedFace), DIMENSION_TOTAL); \
     boxbpi = config->info.info[locations_idx].dimension[0]; \
-    for (d = 0; d < 896; d++) { \
+    for (d = 0; d < DIMENSION_TOTAL; d++) { \
       detectedFace face; \
-      if (scores_[d] < 0.7) \
+      if (scores_[d] < threshold) \
         continue; \
       num_detection++; \
       face.ymin = locations_[d * boxbpi + 0]; \
@@ -117,7 +138,8 @@ typedef struct
       face.right_ear_y = locations_[d * boxbpi + 13]; \
       face.left_ear_x = locations_[d * boxbpi + 14]; \
       face.left_ear_y = locations_[d * boxbpi + 15]; \
-      face.score = scores_[d]; \
+      face.score = 1.0 / (1.0 + exp (scores_[d])); \
+      face.index = d; \
       g_array_append_val (results, face); \
     } \
   } \
@@ -134,7 +156,19 @@ landmark_init (void **pdata)
   landmarkPluginData *ldata; 
   ldata = *pdata = g_new0 (landmarkPluginData, 1);
   gst_tensors_config_init (&(ldata->config));
+  ldata->anchors = g_array_new(FALSE, TRUE, sizeof(anchor));
   ldata->selection = SELECT_LEFT_EYE;
+  ldata->input_size = INPUT_SIZE_DEFAULT;
+  ldata->num_layers = NUM_LAYERS_DEFAULT;
+  ldata->offset_x = OFFSET_DEFAULT;
+  ldata->offset_y = OFFSET_DEFAULT;
+  ldata->min_scale = MIN_SCALE_DEFAULT;
+  ldata->max_scale = MAX_SCALE_DEFAULT;
+  ldata->strides[0] = 8;
+  ldata->strides[1] = 16;
+  ldata->strides[2] = 16;
+  ldata->strides[3] = 16;
+  ldata->generated = 0;
   return TRUE;
 }
 
@@ -142,7 +176,9 @@ landmark_init (void **pdata)
 static void
 landmark_exit (void **pdata)
 {
-  gst_tensors_config_free(*pdata);
+  landmarkPluginData *ldata = *pdata;
+  gst_tensors_config_free(&(ldata->config));
+  g_array_free(ldata->anchors, TRUE);
   g_free (*pdata);
 }
 
@@ -221,21 +257,107 @@ do {\
   }\
 } while (0);
 
-/** @brief Shorter case statement for search_max */
-#define search_max_case(type, typename) \
-case typename:\
-  search_max(type, i, max_index, max_val._##type, bpe, input_data, num_data);\
-  break;
-
+/**
+ * @brief Calculate anchor scale
+ */
+static gfloat
+_calculate_scale (float min_scale, float max_scale, int stride_index, int num_strides)
+{
+  if (num_strides == 1) {
+    return (min_scale + max_scale) * 0.5f;
+  } else {
+    return min_scale + (max_scale - min_scale) * 1.0 * stride_index / (num_strides - 1.0f);
+  }
+}
 
 static void
-tensorize_face (GstMapInfo * out_info, GArray * results, size_t hsize, int eye)
+_generate_anchors (landmarkPluginData *ldata)
+{
+  int layer_id = 0;
+  int strides[NUM_LAYERS_MAXIMUM];
+  int idx;
+  guint i;
+
+  gint num_layers = ldata->num_layers;
+  gfloat offset_x = ldata->offset_x;
+  gfloat offset_y = ldata->offset_y;
+
+  for (idx = 0; idx < num_layers; idx++) {
+    strides[idx] = ldata->strides[idx];
+  }
+
+  while (layer_id < num_layers) {
+    GArray *aspect_ratios = g_array_new(FALSE, TRUE, sizeof(gfloat));
+    GArray *scales = g_array_new(FALSE, TRUE, sizeof(gfloat));
+    GArray *anchor_height = g_array_new(FALSE, TRUE, sizeof(gfloat));
+    GArray *anchor_width = g_array_new(FALSE, TRUE, sizeof(gfloat));
+
+    int last_same_stride_layer = layer_id;
+
+    while (last_same_stride_layer < num_layers
+           && strides[last_same_stride_layer] == strides[layer_id]) {
+      gfloat scale;
+      gfloat ratio = 1.0f;
+      g_array_append_val(aspect_ratios, ratio);
+      g_array_append_val(aspect_ratios, ratio);
+      scale = _calculate_scale(ldata->min_scale, ldata->max_scale,
+                                     last_same_stride_layer, num_layers);
+      g_array_append_val(scales, scale);
+      scale = _calculate_scale(ldata->min_scale, ldata->max_scale,
+                                     last_same_stride_layer + 1, num_layers);
+      g_array_append_val(scales, scale);
+      last_same_stride_layer++;
+    }
+
+    for (i = 0; i < aspect_ratios->len; ++i) {
+      const float ratio_sqrts = sqrt(g_array_index (aspect_ratios, gfloat, i));
+      const gfloat sc = g_array_index (scales, gfloat, i);
+      gfloat anchor_height_ = sc / ratio_sqrts;
+      gfloat anchor_width_ = sc * ratio_sqrts;
+      g_array_append_val(anchor_height, anchor_height_);
+      g_array_append_val(anchor_width, anchor_width_);
+    }
+
+    {
+      int feature_map_height = 0;
+      int feature_map_width = 0;
+      int x, y;
+      int anchor_id;
+
+      const int stride = strides[layer_id];
+      feature_map_height = ceil(1.0f * INPUT_SIZE_DEFAULT / stride);
+      feature_map_width = ceil(1.0f * INPUT_SIZE_DEFAULT / stride);
+
+      for (y = 0; y < feature_map_height; ++y) {
+        for (x = 0; x < feature_map_width; ++x) {
+          for (anchor_id = 0; anchor_id < (int)aspect_ratios->len; ++anchor_id) {
+            const float x_center = (x + offset_x) * 1.0f / feature_map_width;
+            const float y_center = (y + offset_y) * 1.0f / feature_map_height;
+
+            const anchor a = {.x_center = x_center, .y_center = y_center,
+              .w = g_array_index (anchor_width, gfloat, anchor_id), .h = g_array_index (anchor_height, gfloat, anchor_id)};
+            g_array_append_val(ldata->anchors, a);
+          }
+        }
+      }
+      layer_id = last_same_stride_layer;
+    }
+
+    g_array_free(aspect_ratios, FALSE);
+  }
+}
+
+static void
+tensorize_face (GstMapInfo * out_info, GArray * results, GArray * anchors, size_t hsize, int selection)
 {
    /* Let's draw per pixel (4bytes) */
   float *out_tensor = (float *) out_info->data;
+  float nose_y, nose_x, draw_x, draw_y, eye_x, eye_y;
+  float x_center, y_center,  modifier, temp;
   unsigned int i, best_idx;
   float best_score = -1;
   detectedFace *best_face;
+  anchor *current_anchor;
   
   for (i = 0; i < results->len; i++) {
     detectedFace *cur = &g_array_index (results, detectedFace, i);
@@ -246,25 +368,51 @@ tensorize_face (GstMapInfo * out_info, GArray * results, size_t hsize, int eye)
   }
   if(best_score > 0) {
     best_face = &g_array_index (results, detectedFace, best_idx);
-    if (eye == SELECT_LEFT_EYE) {
-      out_tensor[hsize/4 + 0] = best_face->left_eye_x < 0 ? 0 : best_face->left_eye_x >0.5? 0.5:best_face->left_eye_x;
-      out_tensor[hsize/4 + 1] = best_face->left_eye_y < 0 ? 0 : best_face->left_eye_y >0.5? 0.5:best_face->left_eye_y;
-      out_tensor[hsize/4 + 2] = 0.5;
-      out_tensor[hsize/4 + 3] = 0.5;
+    current_anchor = &g_array_index (anchors, anchor, best_face->index);
+
+    if (selection == SELECT_LEFT_EYE) {
+      eye_x = best_face->left_eye_x;
+      eye_y = best_face->left_eye_y;
     } else {
-      out_tensor[hsize/4 + 0] = best_face->right_eye_x < 0 ? 0 : best_face->right_eye_x >0.7? 0.7:best_face->right_eye_x;
-      out_tensor[hsize/4 + 1] = best_face->right_eye_y < 0 ? 0 : best_face->right_eye_y >0.7? 0.7:best_face->right_eye_y;;
-      out_tensor[hsize/4 + 2] = 0.2;
-      out_tensor[hsize/4 + 3] = 0.2;
+      eye_x = best_face->right_eye_x;
+      eye_y = best_face->right_eye_y;
     }
+    nose_x = best_face->nose_x;
+    nose_y = best_face->nose_y;
+
+    x_center = current_anchor->x_center;
+    y_center = current_anchor->y_center;
+
+    eye_x = (eye_x + x_center * INPUT_SIZE_DEFAULT) / INPUT_SIZE_DEFAULT;
+    eye_y = (eye_y + y_center * INPUT_SIZE_DEFAULT) / INPUT_SIZE_DEFAULT;
+    nose_x = (nose_x + x_center * INPUT_SIZE_DEFAULT) / INPUT_SIZE_DEFAULT;
+    nose_y = (nose_y + y_center * INPUT_SIZE_DEFAULT) / INPUT_SIZE_DEFAULT;
+
+    modifier = (nose_x - eye_x) / 2;
+    modifier = modifier < 0 ? -modifier : modifier;
+    temp = (nose_y - eye_y) / 2;
+    temp = temp < 0 ? -temp : temp;
+    modifier = modifier > temp ? modifier : temp;
+
+    draw_x = eye_x - modifier;
+    draw_y = eye_y - modifier;
+  
+    out_tensor[hsize/4 + 0] = draw_x < 0 ? 0 : \
+                              draw_x + (modifier * 2) >= 1 ? \
+                              1 - (2 * modifier) : draw_x;
+    out_tensor[hsize/4 + 1] = draw_y < 0 ? 0 : \
+                              draw_y + (modifier * 2) >= 1 ? \
+                              1 - (2 * modifier) : draw_y;
+    out_tensor[hsize/4 + 2] = 2 * modifier;
+    out_tensor[hsize/4 + 3] = 2 * modifier;
   } else {
     out_tensor[hsize/4 + 0] = 0.5;
     out_tensor[hsize/4 + 1] = 0.5;
     out_tensor[hsize/4 + 2] = 0.2;
-    out_tensor[hsize/4 + 3] = 0.2;\
+    out_tensor[hsize/4 + 3] = 0.2;
   }
 
-  GST_WARNING_OBJECT(out_info, "%f %f %f %f", out_tensor[hsize/4+0], out_tensor[hsize/4+1], out_tensor[hsize/4+4], out_tensor[hsize/4+5]);
+  GST_WARNING("\n\n%deye : %f %f\n\nout : %f %f %f %f\n\n", selection, eye_x, eye_y, out_tensor[hsize/4+0], out_tensor[hsize/4+1], out_tensor[hsize/4+2], out_tensor[hsize/4+3]);
 }
 
 /** @brief tensordec-plugin's GstTensorDecoderDef callback */
@@ -286,6 +434,10 @@ landmark_decode (void **pdata, const GstTensorsConfig * config,
   GArray *results = NULL;
   size_t hsize, dsize, size;
   int locations_idx, scores_idx;
+
+  if(!ldata->generated) {
+    _generate_anchors(ldata);
+  }
 
   p_config->rate_d = config->rate_d;
   p_config->rate_n = config->rate_n;
@@ -337,7 +489,7 @@ landmark_decode (void **pdata, const GstTensorsConfig * config,
   }
 
   /** memory write */
-  tensorize_face (&out_info, results, hsize, selection);
+  tensorize_face (&out_info, results, ldata->anchors, hsize, selection);
   memcpy(out_info.data, &meta, sizeof(GstTensorMetaInfo));
   g_array_free (results, TRUE);
 
