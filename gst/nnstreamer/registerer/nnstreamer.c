@@ -53,6 +53,7 @@
 #include <elements/gsttensor_debug.h>
 #include <elements/gsttensor_decoder.h>
 #include <elements/gsttensor_demux.h>
+#include <elements/gsttensor_drawer.h>
 #include <elements/gsttensor_if.h>
 #include <elements/gsttensor_merge.h>
 #include <elements/gsttensor_mux.h>
@@ -97,6 +98,7 @@ gst_nnstreamer_init (GstPlugin * plugin)
   NNSTREAMER_INIT (plugin, debug, DEBUG);
   NNSTREAMER_INIT (plugin, decoder, DECODER);
   NNSTREAMER_INIT (plugin, demux, DEMUX);
+  NNSTREAMER_INIT (plugin, drawer, DRAWER);
   NNSTREAMER_INIT (plugin, filter, FILTER);
   NNSTREAMER_INIT (plugin, merge, MERGE);
   NNSTREAMER_INIT (plugin, mux, MUX);

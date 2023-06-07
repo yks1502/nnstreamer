@@ -5,6 +5,7 @@ nnstreamer_sources += files(
   'gsttensor_debug.c',
   'gsttensor_decoder.c',
   'gsttensor_demux.c',
+  'gsttensor_drawer.c',
   'gsttensor_if.c',
   'gsttensor_merge.c',
   'gsttensor_mux.c',

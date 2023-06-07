@@ -55,6 +55,7 @@ NNSTREAMER_PLUGINS_SRCS := \
     $(NNSTREAMER_GST_HOME)/elements/gsttensor_debug.c \
     $(NNSTREAMER_GST_HOME)/elements/gsttensor_decoder.c \
     $(NNSTREAMER_GST_HOME)/elements/gsttensor_demux.c \
+    $(NNSTREAMER_GST_HOME)/elements/gsttensor_drawer.c \
     $(NNSTREAMER_GST_HOME)/elements/gsttensor_if.c \
     $(NNSTREAMER_GST_HOME)/elements/gsttensor_merge.c \
     $(NNSTREAMER_GST_HOME)/elements/gsttensor_mux.c \
