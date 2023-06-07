@@ -3,60 +3,46 @@
 # require : blazeFace tflite ( face_detection_front.tflite )
 # display text output of landmark_detecting decoder with cam
 
-# gst-launch-1.0 -m \
-#   textoverlay name=overlay font-desc=Sans,12 !  videoconvert ! videoscale ! ximagesink name=img_test sync=false \
-#   v4l2src name=cam_src ! videoconvert ! videoscale ! \
-#   video/x-raw,width=1000,height=1000,format=RGB,pixel-aspect-ratio=1/1,framerate=30/1 ! tee name=t \
-#   t. ! queue ! overlay.video_sink \
-#   t. ! queue leaky=2 max-size-buffers=2 ! videoscale ! video/x-raw,width=128,height=128,format=RGB ! tensor_converter ! \
-#        queue ! tensor_transform mode=arithmetic option=typecast:float32,div:255.0 ! \
-#        tensor_filter framework=tensorflow2-lite model=face_detection_front.tflite \
-#                       output=16:896:1:1,1:896:1:1 \
-#                       outputname=landmarks,scores \
-#                       outputtype=float32,float32 ! \
-#        tensor_decoder mode=landmark_detecting ! overlay.text_sink
-
-# gst-launch-1.0 -m \
-#   v4l2src name=cam_src ! videoconvert ! videoscale ! \
-#   video/x-raw,width=1000,height=1000,format=RGB,pixel-aspect-ratio=1/1,framerate=30/1 ! \
-#   videocrop left=0 top=0 bottom=200 right=200 ! videoconvert !  ximagesink sync=false
-
 gst-launch-1.0 -m \
   tensor_videocrop name=crop_left \
+  tensor_videocrop name=crop_right \
   v4l2src name=cam_src ! videoconvert ! videoscale ! \
   video/x-raw,width=1000,height=1000,format=RGB,pixel-aspect-ratio=1/1,framerate=30/1 ! tee name=t \
   t. ! queue ! crop_left.sink \
-  t. ! queue leaky=2 max-size-buffers=2 ! videoscale ! video/x-raw,width=128,height=128,format=RGB ! tensor_converter ! \
-       queue ! tensor_transform mode=arithmetic option=typecast:float32,div:255.0 ! \
+  t. ! queue ! crop_right.sink \
+  t. ! queue ! videoscale ! video/x-raw,width=128,height=128,format=RGB ! tensor_converter ! \
+       queue ! tensor_transform mode=arithmetic option=typecast:float32,div:255.0,add:-0.5,div:0.5 ! \
        tensor_filter framework=tensorflow2-lite model=face_detection_front.tflite \
                       output=16:896:1:1,1:896:1:1 \
                       outputname=landmarks,scores \
-                      outputtype=float32,float32 ! \
-       tensor_decoder mode=landmark_detecting ! crop_left.info \
-  crop_left.src !  videoconvert ! videoscale ! ximagesink sync=false
+                      outputtype=float32,float32 ! tee name=tf\
+       tf. ! tensor_decoder mode=landmark_detecting option1=left ! crop_left.info \
+       tf. ! tensor_decoder mode=landmark_detecting option1=right ! crop_right.info \
+  crop_left.src ! videoconvert ! ximagesink sync=false \
+  crop_right.src ! videoconvert ! ximagesink sync=false
+
+# gst-launch-1.0 -m \
+#   v4l2src name=cam_src ! videoconvert ! videoscale ! \
+#   video/x-raw,width=100,height=100,format=RGB,framerate=30/1 ! tensor_converter ! tensor_split name=split tensorseg=2:100:100,1:100:100 split.src_0 ! queue ! filesink location=src0.log \
+#   split.src_1 ! queue ! filesink location=src1.log
 
 # gst-launch-1.0 -m \
 #   tensor_videocrop name=crop_left \
 #   tensor_videocrop name=crop_right \
-#   tensor_split name=split tensorseg=4:1:1,4:1:1 \
 #   v4l2src name=cam_src ! videoconvert ! videoscale ! \
 #   video/x-raw,width=1000,height=1000,format=RGB,pixel-aspect-ratio=1/1,framerate=30/1 ! tee name=t \
-#   t. ! queue ! mix.sink_0 \
 #   t. ! queue ! crop_left.sink \
 #   t. ! queue ! crop_right.sink \
-#   t. ! queue leaky=2 max-size-buffers=2 ! videoscale ! video/x-raw,width=128,height=128,format=RGB ! tensor_converter ! \
-#        queue ! tensor_transform mode=arithmetic option=typecast:float32,div:255.0 ! \
+#   t. ! queue ! videoscale ! video/x-raw,width=128,height=128,format=RGB ! tensor_converter ! \
+#        queue ! tensor_transform mode=arithmetic option=typecast:float32,div:255.0,add:-0.5,div:0.5 ! \
 #        tensor_filter framework=tensorflow2-lite model=face_detection_front.tflite \
 #                       output=16:896:1:1,1:896:1:1 \
 #                       outputname=landmarks,scores \
-#                       outputtype=float32,float32 ! \
-#        tensor_decoder mode=landmark_detecting ! split.sink \
-#        split.src0 ! queue ! crop_left.info \
-#        split.src1 ! queue ! crop_right.info \
-#   crop_left.src ! queue ! mix.sink_1 \
-#   crop_right.src ! queue ! mix.sink_2 \
-#   compositor name=mix sink_0::zorder=5 sink_1::zorder=2 sink_2::zorder=3 ! videoconvert ! ximagesink sync=false
-
+#                       outputtype=float32,float32 ! tee name=tf\
+#        tf. ! tensor_decoder mode=landmark_detecting option1=left ! crop_left.info \
+#        tf. ! tensor_decoder mode=landmark_detecting option1=right ! crop_right.info \
+#   crop_left.src ! videoconvert ! ximagesink sync=false \
+#   crop_right.src ! videoconvert ! ximagesink sync=false
 #     crop_left.src ! queue ! videoscale ! video/x-raw,width=64,height=64,format=RGB ! tensor_converter ! \
 #                   queue ! tensor_transform mode=arithmetic option=typecast:float32,div:255.0 ! \
 #                   tensor_filter framework=tensorflow2-lite model=iris_landmark.tflite custom=Delegate:XNNPACK,NumThreads:4 ! \

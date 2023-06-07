@@ -59,6 +59,7 @@
 GST_DEBUG_CATEGORY_STATIC (tensor_video_crop_debug);
 
 #define GST_CAT_DEFAULT tensor_video_crop_debug
+#define CAPS_STRING GST_TENSOR_CAP_DEFAULT ";" GST_TENSORS_CAP_WITH_NUM ("1")
 
 typedef struct
 {
@@ -84,7 +85,7 @@ static GstStaticPadTemplate raw_template = GST_STATIC_PAD_TEMPLATE ("sink",
 static GstStaticPadTemplate info_template = GST_STATIC_PAD_TEMPLATE ("info",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS (CROP_INFO_CAPS));
+    GST_STATIC_CAPS (CAPS_STRING));
 
 #define gst_tensor_video_crop_parent_class parent_class
 
@@ -450,7 +451,6 @@ gst_tensor_video_crop_decide_allocation (GstBaseTransform * trans, GstQuery * qu
         ("Dowstream doesn't support crop for non-raw caps"), (NULL));
     return FALSE;
   }
-GST_WARNING("HEEELO");
   return GST_BASE_TRANSFORM_CLASS (parent_class)->decide_allocation (trans,
       query);
 }
@@ -986,6 +986,10 @@ gst_tensor_video_crop_parse_caps (GstTensorVideoCrop * tvcrop, GstCaps * caps)
   tvcrop->tensors_config.info.num_tensors = 1;
   tvcrop->tensors_config.info.format = config.info.format;
 
+  GST_WARNING("f=%d %d, \ndimension[0]=%d\ntype=%d,format=%d",
+  config.rate_d, config.rate_n,config.info.info->dimension[0],
+  config.info.info->type, config.info.format);
+
   for (i = 1; i < NNS_TENSOR_RANK_LIMIT; i++) {
     tvcrop->tensors_config.info.info[0].dimension[i] = 1;
   }
@@ -1002,6 +1006,7 @@ gst_tensor_video_crop_sink_event (GstPad * pad, GstObject * parent, GstEvent * e
 
   self = GST_TENSOR_VIDEO_CROP (parent);
 
+  GST_WARNING("BEGIN PARSE, goint to get tensor");
   GST_WARNING_OBJECT (self, "l=%f,t=%f,w=%f,h=%f",
       self->prop_left, self->prop_top, self->prop_right, self->prop_bottom);
   switch (GST_EVENT_TYPE (event)) {
@@ -1093,9 +1098,10 @@ gst_tensor_video_crop_sink_chain (GstPad * pad, GstObject * parent, GstBuffer * 
   UNUSED (pad);
   self = GST_TENSOR_VIDEO_CROP (parent);
 
-  GST_DEBUG("BEGIN PARSE, goint to get tensor");
+  GST_WARNING("BEGIN PARSE, goint to get tensor");
   buf = gst_tensor_buffer_from_config (buf, &self->tensors_config);
 
+  GST_WARNING("BEGIN PARSE, goint to get tensor");
   if (gst_tensors_config_is_flexible (&self->tensors_config)) {
     /* cannot get exact number of tensors from config */
     num_tensors = gst_buffer_n_memory (buf);

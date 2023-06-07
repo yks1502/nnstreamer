@@ -40,7 +40,8 @@ void init_landmark (void) __attribute__ ((constructor));
 void fini_landmark (void) __attribute__ ((destructor));
 
 #define DECODER_LANDMARK_TEXT_CAPS_STR \
-    GST_TENSOR_CAP_DEFAULT ";" GST_TENSORS_CAP_WITH_NUM ("1") ",types=float32, dimensions = 4:1:1:1:1:1"
+    "other/tensor, " \
+    "type = (string)float32"
 
 // define DECODER_LANDMARK_TEXT_CAPS_STR 
 //     "text/x-raw, format = (string) utf8, framerate=30/1"
@@ -48,6 +49,14 @@ void fini_landmark (void) __attribute__ ((destructor));
 #define LANDMARK_IDX_LOCATIONS_DEFAULT 0
 #define LANDMARK_IDX_SCORES_DEFAULT 1
 #define LANDMARK_THRESHOLD_DEFAULT G_MINFLOAT
+
+#define SELECT_LEFT_EYE 0
+#define SELECT_RIGHT_EYE 1
+
+typedef struct {
+  GstTensorsConfig config;
+  int selection;
+} landmarkPluginData;
 
 typedef struct {
   float left;
@@ -121,10 +130,11 @@ typedef struct
 /** @brief tensordec-plugin's GstTensorDecoderDef callback */
 static int
 landmark_init (void **pdata)
-{        
-  
-  *pdata = g_new0 (GstTensorsConfig, 1);
-  gst_tensors_config_init(*pdata);
+{       
+  landmarkPluginData *ldata; 
+  ldata = *pdata = g_new0 (landmarkPluginData, 1);
+  gst_tensors_config_init (&(ldata->config));
+  ldata->selection = SELECT_LEFT_EYE;
   return TRUE;
 }
 
@@ -140,9 +150,21 @@ landmark_exit (void **pdata)
 static int
 landmark_setOption (void **pdata, int opNum, const char *param)
 {
-  UNUSED (pdata);
-  UNUSED (opNum);
-  UNUSED (param);
+  landmarkPluginData *ldata = *pdata;
+  const char *eye_selection[] = {
+    [SELECT_LEFT_EYE] = "left",
+    [SELECT_RIGHT_EYE] = "right",
+  };
+  if (opNum == 0) {
+    /* option1 = eye selection */
+    if (NULL == param || *param == '\0') {
+      GST_ERROR ("Please set the valid mode at option1");
+      return FALSE;
+    }
+
+    ldata->selection = find_key_strv (eye_selection, param);
+    return TRUE;
+  }
   return TRUE;
 }
 
@@ -151,10 +173,20 @@ static GstCaps *
 landmark_getOutCaps (void **pdata, const GstTensorsConfig * config)
 {
   GstCaps *caps;
-  caps = gst_caps_from_string (DECODER_LANDMARK_TEXT_CAPS_STR);
+  int i;
+  landmarkPluginData * ldata = *pdata;
+  GstTensorsConfig *p_config = &(ldata->config);
+  if(p_config->info.info[0].dimension[0] != 4) {
+    p_config->info.info[0].dimension[0] = 4;
+    for (i = 1; i < NNS_TENSOR_RANK_LIMIT; i++) {
+      p_config->info.info[0].dimension[i] = 1;
+    }
+    p_config->info.info[0].type = _NNS_FLOAT32;
+    p_config->info.num_tensors = 1;
+    p_config->info.format = 0;
+  }
+  caps = gst_tensor_caps_from_config (p_config);
   setFramerateFromConfig (caps, config);
-  UNUSED (pdata);
-  UNUSED (config);
   return caps;
 }
 
@@ -197,7 +229,7 @@ case typename:\
 
 
 static void
-tensorize_face (GstMapInfo * out_info, GArray * results, size_t hsize)
+tensorize_face (GstMapInfo * out_info, GArray * results, size_t hsize, int eye)
 {
    /* Let's draw per pixel (4bytes) */
   float *out_tensor = (float *) out_info->data;
@@ -214,66 +246,25 @@ tensorize_face (GstMapInfo * out_info, GArray * results, size_t hsize)
   }
   if(best_score > 0) {
     best_face = &g_array_index (results, detectedFace, best_idx);
+    if (eye == SELECT_LEFT_EYE) {
+      out_tensor[hsize/4 + 0] = best_face->left_eye_x < 0 ? 0 : best_face->left_eye_x >0.5? 0.5:best_face->left_eye_x;
+      out_tensor[hsize/4 + 1] = best_face->left_eye_y < 0 ? 0 : best_face->left_eye_y >0.5? 0.5:best_face->left_eye_y;
+      out_tensor[hsize/4 + 2] = 0.5;
+      out_tensor[hsize/4 + 3] = 0.5;
+    } else {
+      out_tensor[hsize/4 + 0] = best_face->right_eye_x < 0 ? 0 : best_face->right_eye_x >0.7? 0.7:best_face->right_eye_x;
+      out_tensor[hsize/4 + 1] = best_face->right_eye_y < 0 ? 0 : best_face->right_eye_y >0.7? 0.7:best_face->right_eye_y;;
+      out_tensor[hsize/4 + 2] = 0.2;
+      out_tensor[hsize/4 + 3] = 0.2;
+    }
   } else {
-    GST_WARNING("NO BEST FACE");
+    out_tensor[hsize/4 + 0] = 0.5;
+    out_tensor[hsize/4 + 1] = 0.5;
+    out_tensor[hsize/4 + 2] = 0.2;
+    out_tensor[hsize/4 + 3] = 0.2;\
   }
-  UNUSED(best_face);
-    GST_WARNING("NO BEST FACE");
-  out_tensor[hsize/4 + 0] = 0.3;
-  out_tensor[hsize/4 + 1] = 0.3;
-  out_tensor[hsize/4 + 2] = 0.2;
-  out_tensor[hsize/4 + 3] = 0.2;
-    GST_WARNING("NO BEST FACE");
 
-  // out_tensor[hsize+0] = best_face->left_eye_x;
-  // out_tensor[hsize+1] = best_face->left_eye_y;
-  // out_tensor[hsize+2] = 0.2;
-  // out_tensor[hsize+3] = 0.2;
-  // out_tensor[hsize+4] = best_face->right_eye_x - 0.2;
-  // out_tensor[hsize+5] = best_face->right_eye_y - 0.2;
-  // out_tensor[hsize+6] = 0.2;
-  // out_tensor[hsize+7] = 0.2;
-
-  // if(best_score > 0) {
-  //   sprintf(out_tensor, "best_face @ %d\nl: %f %f\nr: %f %f\nscore=%f",
-  //       (int)best_idx,
-  //       (float)best_face->left_eye_x,
-  //       (float)best_face->left_eye_y,
-  //       (float) best_face->right_eye_x,
-  //       (float)best_face->right_eye_y,
-  //       (float)best_face->score);
-
-  //   GST_WARNING("best: %d of %d\nbox:%f %f %f %f\nle:%f %f\nre:%f %f\n%f %f %f %f  %f %f %f %f %f",
-  //     (int)best_idx,
-  //     results->len,
-  //     g_array_index (results, detectedFace, best_idx).xmin,
-  //     g_array_index (results, detectedFace, best_idx).ymin,
-  //     g_array_index (results, detectedFace, best_idx).xmax,
-  //     g_array_index (results, detectedFace, best_idx).ymax,
-  //     g_array_index (results, detectedFace, best_idx).right_eye_x,
-  //     g_array_index (results, detectedFace, best_idx).right_eye_y,
-  //     g_array_index (results, detectedFace, best_idx).left_eye_x,
-  //     g_array_index (results, detectedFace, best_idx).left_eye_y,
-  //     g_array_index (results, detectedFace, best_idx).nose_x,
-  //     g_array_index (results, detectedFace, best_idx).nose_y,
-  //     g_array_index (results, detectedFace, best_idx).mouth_x,
-  //     g_array_index (results, detectedFace, best_idx).mouth_y,
-  //     g_array_index (results, detectedFace, best_idx).right_ear_x,
-  //     g_array_index (results, detectedFace, best_idx).right_ear_y,
-  //     g_array_index (results, detectedFace, best_idx).left_ear_x,
-  //     g_array_index (results, detectedFace, best_idx).left_ear_y,
-  //     g_array_index (results, detectedFace, best_idx).score
-  //   );
-  // } else {
-  //   sprintf(out_tensor, "no face\nl: %f %f\nr: %f %f\nscore=%f",
-  //       (float)0,
-  //       (float)0,
-  //       (float)0,
-  //       (float)0,
-  //       (float)0);
-  // }
-
-  // GST_WARNING_OBJECT(out_info, "%f %f %f %f", out_tensor[0], out_tensor[1], out_tensor[2], out_tensor[3]);
+  GST_WARNING_OBJECT(out_info, "%f %f %f %f", out_tensor[hsize/4+0], out_tensor[hsize/4+1], out_tensor[hsize/4+4], out_tensor[hsize/4+5]);
 }
 
 /** @brief tensordec-plugin's GstTensorDecoderDef callback */
@@ -284,9 +275,11 @@ landmark_decode (void **pdata, const GstTensorsConfig * config,
   GstMapInfo out_info;
   GstMemory *out_mem;
   GstBuffer *temp_buf;
-  gint num_detection = 0, i;
+  gint num_detection = 0;
   GstTensorMetaInfo meta;
-  GstTensorsConfig *p_config = *pdata;
+  landmarkPluginData * ldata = *pdata;
+  GstTensorsConfig *p_config = &(ldata->config);
+  int selection = ldata->selection;
 
   const GstTensorMemory *mem_locations, *mem_scores;
   gboolean need_output_alloc;
@@ -296,25 +289,11 @@ landmark_decode (void **pdata, const GstTensorsConfig * config,
 
   p_config->rate_d = config->rate_d;
   p_config->rate_n = config->rate_n;
-  p_config->info.info[0].dimension[0] = 4;
-  p_config->info.info[0].name = g_strdup ("eyes");
-  p_config->info.info[0].type = _NNS_FLOAT32;
-  p_config->info.num_tensors = 1;
-  p_config->info.format = config->info.format;
-
-    for (i = 1; i < NNS_TENSOR_RANK_LIMIT; i++) {
-    p_config->info.info[0].dimension[i] = 1;
-  }
-
-  GST_WARNING("%d", (int)p_config->info.info[0].dimension[0]);
-  GST_WARNING("%d", (int)p_config->info.info[0].dimension[1]);
 
   gst_tensor_info_convert_to_meta(&p_config->info.info[0], &meta);
   hsize = gst_tensor_meta_info_get_header_size(&meta);
   dsize = gst_tensor_info_get_size(&(p_config->info.info[0]));
   size  = hsize + dsize;
-  GST_WARNING("%d", (int)hsize);
-  GST_WARNING("%d", (int)dsize);
 
   g_assert (outbuf);
   need_output_alloc = gst_buffer_get_size (outbuf) == 0;
@@ -358,7 +337,7 @@ landmark_decode (void **pdata, const GstTensorsConfig * config,
   }
 
   /** memory write */
-  tensorize_face (&out_info, results, hsize);
+  tensorize_face (&out_info, results, hsize, selection);
   memcpy(out_info.data, &meta, sizeof(GstTensorMetaInfo));
   g_array_free (results, TRUE);
 
@@ -377,6 +356,8 @@ landmark_decode (void **pdata, const GstTensorsConfig * config,
   }
 
   UNUSED (config);
+
+  GST_WARNING("parse_eye : done");
   return GST_FLOW_OK;
 }
 
