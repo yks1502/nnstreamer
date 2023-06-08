@@ -162,6 +162,7 @@ eye_getOutCaps (void **pdata, const GstTensorsConfig * config)
 {
   eye_data *data = *pdata;
   GstCaps *caps;
+  char *str;
   int num_tensors, d, i;
 
   g_return_val_if_fail (config != NULL, NULL);
@@ -181,9 +182,11 @@ eye_getOutCaps (void **pdata, const GstTensorsConfig * config)
   }
 
   /* set out capacities */
-  caps = gst_caps_from_string (DECODER_EYE_TENSOR_CAPS_STR);
+  str = g_strdup_printf ("video/x-raw, format = RGBA, " /* Use alpha channel to make the background transparent */
+      "width = %u, height = %u", data->width, data->height);
+  caps = gst_caps_from_string (str);
   setFramerateFromConfig (caps, config);
-
+  g_free (str);
   return caps;
 }
 
