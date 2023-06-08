@@ -21,7 +21,7 @@
  *              which converts eye detecting tensors to text stream.
  *
  * @see         https://github.com/nnstreamer/nnstreamer
- * @author      Hyeonwoo Koo <gusdn1397@gamil.com>
+ * @author      Hyeonwoo Koo <gusdn1397@gmail.com>
  * @bug         No known bugs except for NYI items
  *
  */
