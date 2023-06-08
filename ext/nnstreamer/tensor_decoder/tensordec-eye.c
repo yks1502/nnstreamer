@@ -46,7 +46,7 @@ void fini_eye (void) __attribute__ ((destructor));
 #define DEFAULT_HEIGHT                           (64)
 #define EYE_PIXEL_VALUE                          (0xFF0000FF)    /* RED 100% in RGBA */
 #define PUPIL_PIXEL_VALUE                        (0xFFFF0000)    /* BLUE 100% in RGBA */
-#define DOT_SIZE                                 (4)
+#define DOT_SIZE                                 (2)
 
 #define DECODER_EYE_TENSOR_CAPS_STR \
     "other/tensors, num_tensors = (int) 1, types = (string) uint32, dimensions = (string) 154:1:1:1, format = (string) static"
