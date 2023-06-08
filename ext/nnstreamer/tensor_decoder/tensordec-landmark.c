@@ -388,9 +388,9 @@ tensorize_face (GstMapInfo * out_info, GArray * results, GArray * anchors, size_
     nose_x = (nose_x + x_center * INPUT_SIZE_DEFAULT) / INPUT_SIZE_DEFAULT;
     nose_y = (nose_y + y_center * INPUT_SIZE_DEFAULT) / INPUT_SIZE_DEFAULT;
 
-    modifier = (nose_x - eye_x) / 2;
+    modifier = (nose_x - eye_x) / 1.2;
     modifier = modifier < 0 ? -modifier : modifier;
-    temp = (nose_y - eye_y) / 2;
+    temp = (nose_y - eye_y) / 1.2;
     temp = temp < 0 ? -temp : temp;
     modifier = modifier > temp ? modifier : temp;
 

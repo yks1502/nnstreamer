@@ -4,6 +4,10 @@
 # process eye_detecting decoder with cam
 
 # Cropped eyes with face-landmark
+# you can use webcam by using :
+# v4l2src name=cam_src ! videoconvert ! videoscale ! \
+# you can use still image by using :
+# filesrc location=jin.jpg ! decodebin ! videoconvert ! imagefreeze ! videoscale ! \
 gst-launch-1.0 -m \
   tensor_videocrop name=crop_left \
   tensor_videocrop name=crop_right \
@@ -26,15 +30,15 @@ gst-launch-1.0 -m \
               tensor_transform mode=arithmetic option=typecast:float32,div:255.0 ! \
               queue ! tensor_filter framework=tensorflow2-lite model=iris_landmark.tflite custom=Delegate:XNNPACK,NumThreads:4 ! \
               other/tensors,num_tensors=2,types=\"float32\,float32\",dimensions=\"213:1:1:1\,15:1:1:1\",format=static ! \
-              tensor_decoder mode=eye_detecting option1=300:300 ! \
-              videoconvert ! videoscale ! mix_left.sink_0 \
+              tensor_decoder mode=eye_detecting option1=64:64 ! \
+              videoconvert ! videoscale ! videoscale ! video/x-raw,width=300,height=300,format=RGBA ! mix_left.sink_0 \
   eye_right. ! mix_right.sink_1 \
   eye_right. ! videoscale ! video/x-raw,width=64,height=64,format=RGB ! tensor_converter ! \
               tensor_transform mode=arithmetic option=typecast:float32,div:255.0 ! \
               queue ! tensor_filter framework=tensorflow2-lite model=iris_landmark.tflite custom=Delegate:XNNPACK,NumThreads:4 ! \
               other/tensors,num_tensors=2,types=\"float32\,float32\",dimensions=\"213:1:1:1\,15:1:1:1\",format=static ! \
-              tensor_decoder mode=eye_detecting option1=300:300 ! \
-              videoconvert ! videoscale ! mix_right.sink_0 \
+              tensor_decoder mode=eye_detecting option1=64:64 ! \
+              videoconvert ! videoscale ! video/x-raw,width=300,height=300,format=RGBA ! mix_right.sink_0 \
   compositor name=mix_left sink_0::zorder=2 sink_1::zorder=1 ! videoconvert ! \
              textoverlay text="left_iris" valignment=bottom halignment=center font-desc="Sans, 36" ! ximagesink sync=false \
   compositor name=mix_right sink_0::zorder=2 sink_1::zorder=1 ! videoconvert ! \
