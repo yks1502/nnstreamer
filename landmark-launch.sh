@@ -19,8 +19,8 @@ gst-launch-1.0 -m \
        tf. ! tensor_decoder mode=landmark_detecting option1=left ! crop_left.info \
        tf. ! tensor_decoder mode=landmark_detecting option1=right ! crop_right.info \
   t. ! videoconvert ! videoscale ! ximagesink sync=false \
-  crop_left.src ! videoconvert ! videoscale ! ximagesink sync=false \
-  crop_right.src ! videoconvert ! videoscale ! ximagesink sync=false
+  crop_left.src ! videoconvert ! videoscale ! video/x-raw,width=64,height=64,format=RGB,framerate=30/1 ! videoconvert ! videoscale ! ximagesink sync=false \
+  crop_right.src ! videoconvert ! videoscale ! video/x-raw,width=64,height=64,format=RGB,framerate=30/1 ! videoconvert ! videoscale !  ximagesink sync=false
 
 # gst-launch-1.0 -m \
 #   v4l2src name=cam_src ! videoconvert ! videoscale ! \
