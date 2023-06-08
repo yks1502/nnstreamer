@@ -98,8 +98,7 @@ static_library('nnstreamer_decoder_image_segment',
 # eye detecting
 decoder_sub_eye_detecting_sources = [
   'tensordec-eye.c',
-  'tensordecutil.c',
-  'tensordec-font.c'
+  'tensordecutil.c'
 ]
 
 shared_library('nnstreamer_decoder_eye_detecting',
