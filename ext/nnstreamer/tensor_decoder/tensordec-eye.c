@@ -48,9 +48,6 @@ void fini_eye (void) __attribute__ ((destructor));
 #define PUPIL_PIXEL_VALUE                        (0xFFFF0000)    /* BLUE 100% in RGBA */
 #define DOT_SIZE                                 (4)
 
-#define DECODER_EYE_TEXT_CAPS_STR \
-    "text/x-raw, format = (string) utf8"
-
 #define DECODER_EYE_TENSOR_CAPS_STR \
     "other/tensors, num_tensors = (int) 1, types = (string) uint32, dimensions = (string) 154:1:1:1, format = (string) static"
 
@@ -184,29 +181,37 @@ eye_getTransformSize (void **pdata, const GstTensorsConfig * config,
  * @param[out] out_info The output buffer (RGBA plain)
  * @param[in] data The eye internal data.
  */
-/*
 static void
-draw (GstMapInfo * out_info, eye_data * data)
+draw (GstMapInfo * out_info, const GstTensorsConfig * config, eye_data * data, const GstTensorMemory *input)
 {
-  uint32_t *frame = (uint32_t *) out_info->data;
+  uint32_t *frame;
   guint i, s, ratio_w, ratio_h;
+  guint num_pupil_tensor, num_eye_tensor;
+  const GstTensorMemory *in_data;
+
   ratio_w = data->width / DEFAULT_WIDTH;
   ratio_h = data->height / DEFAULT_HEIGHT;
+  num_pupil_tensor = (config->info.info[0].dimension[0]);
+  num_eye_tensor = (config->info.info[1].dimension[0]);
+  frame = (uint32_t *) out_info->data;
 
-  for (i = 0; i < data->eye_tensor_x->len; i++) {
-    guint pos_x = g_array_index (data->eye_tensor_x, guint, i);
-    guint pos_y = g_array_index (data->eye_tensor_y, guint, i);
+  in_data = &input[0];
+  for (i = 0; i < num_eye_tensor; i++) {
+    guint pos_x = (guint)((float*) in_data->data)[3 * i];
+    guint pos_y = (guint)((float*) in_data->data)[3 * i + 1];
 
     for (s = 0; s < DOT_SIZE*DOT_SIZE; s++) {
       guint x = coercein((pos_x) * ratio_w + (s%DOT_SIZE - DOT_SIZE / 2), 0, data->width - 1);
       guint y = coercein((pos_y) * ratio_h + (s/DOT_SIZE - DOT_SIZE / 2), 0, data->height - 1);
       uint32_t *pos = &frame[((y)) * data->width + (x)];
       *pos = EYE_PIXEL_VALUE;
-    
+    }
+  }
 
-  for (i = 0; i < NUM_PUPIL_TENSOR; i++) {
-    guint pos_x = data->pupil_tensor_x->lenata->pupil_tensor_x, guint, i);
-    guint pos_y = g_array_index (data->pupil_tensor_y, guint, i);
+  in_data = &input[1];
+  for (i = 0; i < num_pupil_tensor; i++) {
+    guint pos_x = (guint)((float*) in_data->data)[3 * i];
+    guint pos_y = (guint)((float*) in_data->data)[3 * i + 1];
 
     for (s = 0; s < DOT_SIZE*DOT_SIZE; s++) {
       guint x = coercein((pos_x) * ratio_w + (s%DOT_SIZE - DOT_SIZE / 2), 0, data->width - 1);
@@ -217,7 +222,6 @@ draw (GstMapInfo * out_info, eye_data * data)
   }
 }
 
-*/
 /** @brief tensordec-plugin's GstTensorDecoderDef callback */
 static GstFlowReturn
 eye_decode (void **pdata, const GstTensorsConfig * config,
@@ -227,15 +231,6 @@ eye_decode (void **pdata, const GstTensorsConfig * config,
   const size_t size = (size_t) data->width * data->height * 4;
   GstMapInfo out_info;
   GstMemory *out_mem;
-  const GstTensorMemory *in_data;
-  guint i, s, num_pupil_tensor, num_eye_tensor;
-  guint ratio_w, ratio_h;
-  uint32_t *frame;
-  num_pupil_tensor = (config->info.info[0].dimension[0]);
-  num_eye_tensor = (config->info.info[1].dimension[0]);
-
-  ratio_w = data->width / DEFAULT_WIDTH;
-  ratio_h = data->height / DEFAULT_HEIGHT;
  
   g_assert (outbuf); /** GST Internal Bug */
   /* Ensure we have outbuf properly allocated */
@@ -256,46 +251,9 @@ eye_decode (void **pdata, const GstTensorsConfig * config,
   /** reset the buffer with alpha 0 / black */
   memset (out_info.data, 0, size);
 
-  UNUSED(data);
-
   /* @todo apply offset to each dot */
-  frame = (uint32_t *) out_info.data;
-  in_data = &input[0];
-  for (i = 0; i < num_eye_tensor; i++) {
-    // guint *pos_x = &g_array_index (data->eye_tensor_x, guint, i);
-    // guint *pos_y = &g_array_index (data->eye_tensor_y, guint, i);
-    // *pos_x = (guint)((float*) in_data->data)[3 * i];
-    // *pos_y = (guint)((float*) in_data->data)[3 * i + 1];
-    guint pos_x = (guint)((float*) in_data->data)[3 * i];
-    guint pos_y = (guint)((float*) in_data->data)[3 * i + 1];
+  draw (&out_info, config, data, input);
 
-    for (s = 0; s < DOT_SIZE*DOT_SIZE; s++) {
-      guint x = coercein((pos_x) * ratio_w + (s%DOT_SIZE - DOT_SIZE / 2), 0, data->width - 1);
-      guint y = coercein((pos_y) * ratio_h + (s/DOT_SIZE - DOT_SIZE / 2), 0, data->height - 1);
-      uint32_t *pos = &frame[((y)) * data->width + (x)];
-      *pos = EYE_PIXEL_VALUE;
-    }
-  }
-
-  in_data = &input[1];
-  for (i = 0; i < num_pupil_tensor; i++) {
-    // guint *pos_x = &g_array_index (data->pupil_tensor_x, guint, i);
-    // guint *pos_y = &g_array_index (data->pupil_tensor_y, guint, i);
-    // *pos_x = (guint)((float*) in_data->data)[3 * i];
-    // *pos_y = (guint)((float*) in_data->data)[3 * i + 1];
-    
-    guint pos_x = (guint)((float*) in_data->data)[3 * i];
-    guint pos_y = (guint)((float*) in_data->data)[3 * i + 1];
-
-    for (s = 0; s < DOT_SIZE*DOT_SIZE; s++) {
-      guint x = coercein((pos_x) * ratio_w + (s%DOT_SIZE - DOT_SIZE / 2), 0, data->width - 1);
-      guint y = coercein((pos_y) * ratio_h + (s/DOT_SIZE - DOT_SIZE / 2), 0, data->height - 1);
-      uint32_t *pos = &frame[((y)) * data->width + (x)];
-      *pos = PUPIL_PIXEL_VALUE;
-    }
-  }
-
-  //draw (&out_info, data, input);
   gst_memory_unmap (out_mem, &out_info);
   if (gst_buffer_get_size (outbuf) == 0)
     gst_buffer_append_memory (outbuf, out_mem);
